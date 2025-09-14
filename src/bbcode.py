@@ -557,6 +557,41 @@ class BBCODE:
         desc = desc.replace('[/code]', '[/quote]')
         return desc
 
+    def convert_comparison_to_hide(self, desc):
+        comparisons = re.findall(r"\[comparison=[\s\S]*?\[\/comparison\]", desc)
+        for comp in comparisons:
+            # Extract sources and count them
+            comp_sources = comp.split(']', 1)[0].replace('[comparison=', '').strip()
+            comp_sources = re.split(r"\s*,\s*", comp_sources)
+            num_sources = len(comp_sources)
+
+            # Extract all image URLs
+            comp_content = comp.split(']', 1)[1].replace('[/comparison]', '')
+            comp_images = re.findall(r"(https?:\/\/[^\s\[\]]+\.(?:png|jpg))", comp_content, flags=re.IGNORECASE)
+
+            # Arrange images in groups matching the number of sources
+            arranged_images = []
+            for i in range(0, len(comp_images), num_sources):
+                group = comp_images[i:i + num_sources]
+                if len(group) == num_sources:
+                    arranged_images.extend(group)
+
+            # Format the images as comma-separated groups
+            formatted_images = []
+            for i in range(0, len(arranged_images), num_sources):
+                group = arranged_images[i:i + num_sources]
+                formatted_images.append(', '.join(group))
+
+            # Join all groups with newlines
+            final_images = '\n'.join(formatted_images)
+
+            # Create the hide tag
+            sources_label = ' vs '.join(comp_sources)
+            new_bbcode = f"[hide={sources_label}]{final_images}[/hide]"
+            desc = desc.replace(comp, new_bbcode)
+
+        return desc
+
     def convert_comparison_to_collapse(self, desc, max_width):
         comparisons = re.findall(r"\[comparison=[\s\S]*?\[\/comparison\]", desc)
         for comp in comparisons:
