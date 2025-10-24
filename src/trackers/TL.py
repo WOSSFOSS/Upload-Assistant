@@ -403,7 +403,7 @@ class TL:
                 async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}].torrent", 'rb') as f:
                     torrent_bytes = await f.read()
 
-                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60), headers=self.session.headers) as aiohttp_session:
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60), headers=self.session.headers, cookies=self.session.cookies) as aiohttp_session:
                     form_data = aiohttp.FormData()
                     form_data.add_field('file', torrent_bytes, filename='torrent.torrent', content_type='application/x-bittorrent')
                     data_copy = data.copy()
