@@ -1,6 +1,8 @@
 # -*- coding: utf-8 -*-
 # import discord
 import aiofiles
+import aiohttp
+import aiohttp.client_exceptions
 import httpx
 import os
 import re
@@ -400,11 +402,19 @@ class TL:
 
                 async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}].torrent", 'rb') as f:
                     torrent_bytes = await f.read()
-                files = {'torrent': ('torrent.torrent', torrent_bytes, 'application/x-bittorrent')}
 
-                response = await self.session.post(url=self.http_upload_url, files=files, data=data)
+                async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=60)) as aiohttp_session:
+                    form_data = aiohttp.FormData()
+                    form_data.add_field('file', torrent_bytes, filename='torrent.torrent', content_type='application/x-bittorrent')
+                    data_copy = data.copy()
+                    screenshots = data_copy.pop('screenshots[]', [])
+                    form_data.add_fields(*data_copy.items())
+                    form_data.add_fields([('screenshots[]', url) for url in screenshots])
+                    async with aiohttp_session.post(url=f"{self.base_url}/upload/", data=form_data) as response:
+                        response_text = await response.text()
 
-                if response.status_code == 302 and 'location' in response.headers:
+
+                if response.status == 302 and 'location' in response.headers:
                     torrent_id = response.headers['location'].replace('/successfulupload?torrentID=', '')
                     torrent_url = f"{self.base_url}/torrent/{torrent_id}"
                     status_message = 'Torrent uploaded successfully.'
@@ -414,14 +424,14 @@ class TL:
                     status_message = 'data error - Upload failed: No success redirect found.'
                     failure_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]FailedUpload.html"
                     async with aiofiles.open(failure_path, "w", encoding="utf-8") as failure_file:
-                        await failure_file.write(f"Status Code: {response.status_code}\n")
+                        await failure_file.write(f"Status Code: {response.status}\n")
                         await failure_file.write(f"Headers: {response.headers}\n")
-                        await failure_file.write(response.text)
+                        await failure_file.write(response_text)
                     console.print(f"[yellow]The response was saved at: '{failure_path}'[/yellow]")
 
                 await self.common.add_tracker_torrent(meta, self.tracker, self.source_flag, self.announce_list, torrent_url)
 
-            except httpx.RequestError as e:
+            except aiohttp.client_exceptions.ClientConnectionError as e:
                 status_message = f'data error - {str(e)}'
 
             meta['tracker_status'][self.tracker]['status_message'] = status_message
