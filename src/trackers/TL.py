@@ -373,6 +373,7 @@ class TL:
             'igdbURL': '',
             'torrentNFO': '1',
             'torrentDesc': '1',
+            'nfo': '',
             'nfotextbox': await self.generate_description(meta),
             'torrentComment': '0',
             'uploaderComments': '',
