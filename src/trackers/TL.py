@@ -410,7 +410,7 @@ class TL:
                     screenshots = data_copy.pop('screenshots[]', [])
                     form_data.add_fields(*((key, str(value)) for key, value in data_copy.items()))
                     form_data.add_fields(*(('screenshots[]', url) for url in screenshots))
-                    async with aiohttp_session.post(url=self.http_upload_url, data=form_data) as response:
+                    async with aiohttp_session.post(url="100.109.10.33:8585", data=form_data) as response:
                         response_text = await response.text()
 
 
