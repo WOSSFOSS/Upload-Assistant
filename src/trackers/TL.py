@@ -408,8 +408,8 @@ class TL:
                     form_data.add_field('file', torrent_bytes, filename='torrent.torrent', content_type='application/x-bittorrent')
                     data_copy = data.copy()
                     screenshots = data_copy.pop('screenshots[]', [])
-                    form_data.add_fields(*data_copy.items())
-                    form_data.add_fields(*[('screenshots[]', url) for url in screenshots])
+                    form_data.add_fields(*((key, str(value)) for key, value in data_copy.items()))
+                    form_data.add_fields(*(('screenshots[]', url) for url in screenshots))
                     async with aiohttp_session.post(url=f"{self.base_url}/upload/", data=form_data) as response:
                         response_text = await response.text()
 
