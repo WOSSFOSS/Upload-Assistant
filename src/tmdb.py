@@ -2054,6 +2054,7 @@ async def set_tmdb_metadata(meta: dict[str, Any], filename: Optional[str] = None
                     filename=filename,
                 )
 
+                console.print(f"TMDB metadata status: tmdb_metadata = {bool(tmdb_metadata)}, tmdb_metadata.get('title') = {(tmdb_metadata or {}).get('title')} ({bool((tmdb_metadata or {}).get('title'))}), tmdb_metadata.get('year') = {(tmdb_metadata or {}).get('year')} ({bool((tmdb_metadata or {}).get('year'))})")
                 if tmdb_metadata and all(tmdb_metadata.get(field) for field in ['title', 'year']):
                     meta.update(tmdb_metadata)
                     if meta.get('retrieved_aka') is not None:
