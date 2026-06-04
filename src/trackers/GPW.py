@@ -677,6 +677,10 @@ class GPW:
             response_data = payload.get('response') if isinstance(payload, dict) else None
             response_keys = list(response_data.keys()) if isinstance(response_data, dict) else type(response_data).__name__
             console.print(f"[yellow]{self.tracker}: API browse returned no parsed dupes. payload={payload_keys}, response={response_keys}[/yellow]", markup=False)
+            if isinstance(response_data, list) and response_data:
+                first = response_data[0]
+                if isinstance(first, dict):
+                    console.print(f"[yellow]{self.tracker}: API browse first response keys: {list(first.keys())}[/yellow]", markup=False)
         return dupes
 
     async def get_group_torrents_from_api(self, meta: dict[str, Any], group_id: str) -> list[dict[str, Any]]:
@@ -723,16 +727,19 @@ class GPW:
             return []
 
         response_data = payload.get('response', payload)
-        if not isinstance(response_data, dict):
+        if isinstance(response_data, list):
+            results = response_data
+        elif isinstance(response_data, dict):
+            results = (
+                response_data.get('results')
+                or response_data.get('Results')
+                or response_data.get('movies')
+                or response_data.get('Movies')
+                or []
+            )
+        else:
             return []
 
-        results = (
-            response_data.get('results')
-            or response_data.get('Results')
-            or response_data.get('movies')
-            or response_data.get('Movies')
-            or []
-        )
         if not isinstance(results, list):
             return []
 
@@ -743,6 +750,8 @@ class GPW:
 
             group_id = self.first_present(result, ('groupId', 'GroupId', 'groupID', 'GroupID', 'group_id', 'ID', 'id'))
             torrents = result.get('torrents') or result.get('Torrents') or []
+            if not torrents:
+                torrents = [result]
             if not isinstance(torrents, list):
                 continue
 
@@ -758,11 +767,24 @@ class GPW:
                     or torrent.get('ReleaseName')
                     or self.format_existing_torrent_name(torrent)
                 )
+                if not name:
+                    name = self.format_existing_torrent_name(result)
                 link = None
                 if group_id and torrent_id:
                     link = f'{self.base_url}/torrents.php?id={group_id}&torrentid={torrent_id}'
                 elif torrent_id:
                     link = f'{self.torrent_url}{torrent_id}'
+                else:
+                    link = (
+                        torrent.get('link')
+                        or torrent.get('Link')
+                        or torrent.get('url')
+                        or torrent.get('URL')
+                        or result.get('link')
+                        or result.get('Link')
+                        or result.get('url')
+                        or result.get('URL')
+                    )
 
                 dupes.append({
                     'name': str(name).strip(),
