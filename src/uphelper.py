@@ -101,8 +101,8 @@ class UploadHelper:
             if not other_uploads:
                 return
 
-            console.print(f"[bold blue]Other uploads:[/bold blue] [yellow]{tracker_name}[/yellow]")
             console.print()
+            console.print(f"[bold blue]Other uploads:[/bold blue] [yellow]{tracker_name}[/yellow]")
             console.print(f"[bold cyan]{chr(10).join(_format_dupe(entry) for entry in other_uploads)}[/bold cyan]")
 
         dupes_list: list[Union[DupeEntry, str]] = dupes
@@ -253,7 +253,6 @@ class UploadHelper:
                             console.print(f"[bold cyan]{season_pack_text}[/bold cyan]")
                         else:
                             console.print(f"[bold blue]Check if these are actually dupes from {tracker_name}:[/bold blue]")
-                            console.print()
                             console.print(f"[bold cyan]{dupe_text}[/bold cyan]")
                             _print_other_uploads()
                         if meta.get('dupe', False) is False:
