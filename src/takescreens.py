@@ -1535,7 +1535,7 @@ async def capture_screenshot(args: tuple[int, str, float, str, float, float, flo
         else:
             stderr_text = (stderr or b"").decode('utf-8', errors='replace')
             if "Error initializing complex filters" in stderr_text:
-                console.print("[red]FFmpeg complex filters error: see https://github.com/Audionut/Upload-Assistant/wiki/ffmpeg---max-workers-issues[/red]")
+                console.print("[red]FFmpeg complex filters error: see https://github.com/fr1day13/Upload-Assistant/tree/nightly[/red]")
             else:
                 console.print(f"[red]FFmpeg error capturing screenshot: {stderr_text}[/red]")
             return (index, None)

@@ -154,7 +154,7 @@ class TL:
 
         # Signature
         desc_parts.append(
-            f"""<div style="text-align: right; font-size: 11px;"><a href="https://github.com/Audionut/Upload-Assistant">{meta.get('ua_signature', '')}</a></div>"""
+            f"""<div style="text-align: right; font-size: 11px;"><a href="https://github.com/fr1day13/Upload-Assistant/tree/nightly">{meta.get('ua_signature', '')}</a></div>"""
         )
 
         description = '\n\n'.join(part for part in desc_parts if part.strip())
