@@ -44,6 +44,14 @@ class DupeChecker:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
 
+    @staticmethod
+    def _first_present(entry: MutableMapping[str, Any], keys: Sequence[str]) -> Any:
+        for key in keys:
+            value = entry.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
     async def filter_dupes(self, dupes: Sequence[DupeInput], meta: Meta, tracker_name: str) -> list[DupeEntry]:
         """
         Filter duplicates by applying exclusion rules. Only non-excluded entries are returned.
@@ -91,17 +99,47 @@ class DupeChecker:
                     'description': None,
                 })
             elif isinstance(d, dict):
+                raw_entry = cast(MutableMapping[str, Any], d)
+                size_value = self._first_present(raw_entry, ("size", "Size", "file_size", "filesize", "FileSize", "bytes", "Bytes"))
+                link_value = self._first_present(raw_entry, (
+                    "link",
+                    "details_link",
+                    "detail_link",
+                    "torrent_link",
+                    "url",
+                    "URL",
+                    "Url",
+                    "Link",
+                ))
+                download_value = self._first_present(raw_entry, (
+                    "download",
+                    "download_link",
+                    "download_url",
+                    "Download",
+                    "DownloadLink",
+                    "DownloadUrl",
+                ))
+                id_value = self._first_present(raw_entry, (
+                    "id",
+                    "ID",
+                    "Id",
+                    "torrent_id",
+                    "TorrentID",
+                    "TorrentId",
+                    "torrentId",
+                ))
+
                 # Create a base entry with default values
                 entry: DupeEntry = {
                     'name': str(d.get('name', '')),
-                    'size': d.get('size'),
+                    'size': size_value,
                     'files': [],
                     'file_count': 0,
                     'trumpable': bool(d.get('trumpable', False)),
-                    'link': d.get('link', None),
-                    'download': d.get('download', None),
+                    'link': link_value,
+                    'download': download_value,
                     'flags': d.get('flags', []),
-                    'id': d.get('id', None),
+                    'id': id_value,
                     'type': d.get('type', None),
                     'res': d.get('res', None),
                     'internal': d.get('internal', 0),
