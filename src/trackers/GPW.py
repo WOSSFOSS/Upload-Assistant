@@ -382,8 +382,8 @@ class GPW:
 
         return True
 
-    async def search_existing(self, meta: dict[str, Any], _disctype: str) -> list[dict[str, str]]:
-        dupes: list[dict[str, str]] = []
+    async def search_existing(self, meta: dict[str, Any], _disctype: str) -> list[dict[str, Any]]:
+        dupes: list[dict[str, Any]] = []
 
         if not self.get_additional_checks(meta):
             meta["skipping"] = "GPW"
@@ -399,6 +399,27 @@ class GPW:
             return []
 
         cookies = await self.load_cookies(meta)
+        group_response = cast(dict[str, Any], meta.get(f'{self.tracker}_group_response') or {})
+        group_torrents = cast(list[dict[str, Any]], group_response.get('Torrents') or group_response.get('torrents') or [])
+        if group_torrents:
+            for torrent in group_torrents:
+                name = self.format_existing_torrent_name(torrent)
+                torrent_id = (
+                    torrent.get('TorrentID')
+                    or torrent.get('TorrentId')
+                    or torrent.get('torrentId')
+                    or torrent.get('torrent_id')
+                    or torrent.get('ID')
+                    or torrent.get('Id')
+                    or torrent.get('id')
+                )
+                dupes.append({
+                    'name': name,
+                    'size': torrent.get('Size') or torrent.get('size'),
+                    'link': f'{self.torrent_url}{torrent_id}' if torrent_id else None,
+                })
+            return dupes
+
         if not cookies:
             search_url = f'{self.base_url}/api.php?api_key={self.api_key}&action=torrent&imdbID={imdb}'
             try:
@@ -415,13 +436,6 @@ class GPW:
                             if not isinstance(item, dict):
                                 continue
                             item_dict = cast(dict[str, Any], item)
-                            name = item_dict.get('Name', '')
-                            year = item_dict.get('Year', '')
-                            resolution = item_dict.get('Resolution', '')
-                            source = item_dict.get('Source', '')
-                            processing = item_dict.get('Processing', '')
-                            remaster = item_dict.get('RemasterTitle', '')
-                            codec = item_dict.get('Codec', '')
                             torrent_id = (
                                 item_dict.get('TorrentID')
                                 or item_dict.get('TorrentId')
@@ -441,10 +455,8 @@ class GPW:
                                 or (f'{self.torrent_url}{torrent_id}' if torrent_id else None)
                             )
 
-                            formatted = f'{name} {year} {resolution} {source} {processing} {remaster} {codec}'.strip()
-                            formatted = re.sub(r'\s{2,}', ' ', formatted)
                             dupes.append({
-                                "name": formatted,
+                                "name": self.format_existing_torrent_name(item_dict),
                                 "size": size,
                                 "link": link,
                             })
@@ -744,8 +756,23 @@ class GPW:
 
         if data.get('status') == 200 and 'response' in data and 'ID' in data['response']:
             GPW.group_id = str(data["response"]["ID"])
+            meta[f'{self.tracker}_group_response'] = cast(dict[str, Any], data.get('response') or {})
             return True
         return False
+
+    @staticmethod
+    def format_existing_torrent_name(torrent: dict[str, Any]) -> str:
+        name_parts = [
+            torrent.get('Name') or torrent.get('name') or torrent.get('ReleaseName') or torrent.get('releaseName') or '',
+            torrent.get('Year') or torrent.get('year') or '',
+            torrent.get('Resolution') or torrent.get('resolution') or '',
+            torrent.get('Source') or torrent.get('source') or '',
+            torrent.get('Processing') or torrent.get('processing') or '',
+            torrent.get('RemasterTitle') or torrent.get('remasterTitle') or '',
+            torrent.get('Codec') or torrent.get('codec') or '',
+        ]
+        formatted = ' '.join(str(part) for part in name_parts if part)
+        return re.sub(r'\s{2,}', ' ', formatted).strip()
 
     async def _get_poster(self, meta: dict[str, Any]) -> str:
         poster_url = str(meta.get("poster", "")).strip()

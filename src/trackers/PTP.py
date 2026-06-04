@@ -405,7 +405,7 @@ class PTP:
 
         return tags
 
-    async def search_existing(self, groupID: Union[int, str], meta: dict[str, Any], _disctype: str) -> list[str]:
+    async def search_existing(self, groupID: Union[int, str], meta: dict[str, Any], _disctype: str) -> list[dict[str, Any]]:
         # Map resolutions to SD / HD / UHD
         quality = None
         if meta.get('sd', 0) == 1:  # 1 is SD
@@ -431,15 +431,22 @@ class PTP:
                 response = await client.get(url, headers=headers, params=params)
                 await asyncio.sleep(1)  # Mimic server-friendly delay
                 if response.status_code == 200:
-                    existing: list[str] = []
+                    existing: list[dict[str, Any]] = []
                     try:
                         data = response.json()
                         torrents = cast(list[dict[str, Any]], data.get('Torrents', []))
-                        existing.extend(
-                            f"[{torrent.get('Resolution')}] {torrent.get('ReleaseName', 'RELEASE NAME NOT FOUND')}"
-                            for torrent in torrents
-                            if torrent.get('Quality') == quality and quality is not None
-                        )
+                        group_id = data.get('GroupId') or data.get('GroupID') or groupID
+                        for torrent in torrents:
+                            if torrent.get('Quality') != quality or quality is None:
+                                continue
+                            torrent_id = torrent.get('Id') or torrent.get('TorrentId') or torrent.get('TorrentID')
+                            release_name = torrent.get('ReleaseName', 'RELEASE NAME NOT FOUND')
+                            existing.append({
+                                'name': f"[{torrent.get('Resolution')}] {release_name}",
+                                'size': torrent.get('Size') or torrent.get('size'),
+                                'link': f"https://passthepopcorn.me/torrents.php?id={group_id}&torrentid={torrent_id}" if torrent_id else None,
+                                'id': torrent_id,
+                            })
                     except ValueError:
                         console.print("[red]Failed to parse JSON response from API.")
                     return existing
