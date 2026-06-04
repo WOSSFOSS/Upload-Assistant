@@ -26,6 +26,19 @@ class UploadHelper:
             raise ValueError("'DEFAULT' config section must be a dict")
         self.tracker_class_map = cast(Mapping[str, Any], tracker_class_map)
 
+    @staticmethod
+    def _format_source_size(size_bytes: Any) -> str:
+        try:
+            size = float(size_bytes)
+        except (TypeError, ValueError):
+            size = 0.0
+
+        gib = 1024 ** 3
+        mib = 1024 ** 2
+        if size < gib:
+            return f"{size / mib:.2f} MiB"
+        return f"{size / gib:.2f} GiB"
+
     async def dupe_check(self, dupes: list[Union[DupeEntry, str]], meta: Meta, tracker_name: str) -> tuple[bool, Meta]:
         def _format_dupe(entry: Union[DupeEntry, str]) -> str:
             if isinstance(entry, dict):
@@ -389,7 +402,7 @@ class UploadHelper:
                     exit()
 
             if not meta.get('emby', False):
-                console.print(f"[bold]Name:[/bold] {meta['name']}")
+                console.print(f"[bold]Name:[/bold] {meta['name']} [bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
                 confirm = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N[/yellow]: ").strip().lower() == 'y'
             elif not meta.get('emby_debug', False):
                 confirm = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N[/yellow]: ").strip().lower() == 'y'
