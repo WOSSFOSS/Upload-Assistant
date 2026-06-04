@@ -493,7 +493,7 @@ class MTV:
             if len(meta['bdinfo']['subtitles']) >= 1:
                 tags.append('subtitles')
 
-        tag_string = ' '.join(tag for tag in tags if tag)
+        tag_string = ' '.join(tag.lower() for tag in tags if tag)
         return tag_string
 
     async def validate_credentials(self, meta: Meta) -> bool:
