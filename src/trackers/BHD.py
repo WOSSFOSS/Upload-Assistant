@@ -56,45 +56,15 @@ class BHD:
         }
 
     async def check_image_hosts(self, meta: dict[str, Any]) -> None:
-        rehost_images_manager = RehostImagesManager(self.get_uploadable_image_host_config())
-        await rehost_images_manager.check_hosts(
+        await self.rehost_images_manager.check_hosts(
             meta,
             self.tracker,
             url_host_mapping=self.get_image_host_mapping(),
-            img_host_index=self.get_first_uploadable_image_host_index(),
+            img_host_index=1,
             approved_image_hosts=self.approved_image_hosts,
+            uploadable_image_hosts=self.uploadable_image_hosts,
         )
         return None
-
-    def get_uploadable_image_host_config(self) -> dict[str, Any]:
-        filtered_config = dict(self.config)
-        default_config = dict(cast(dict[str, Any], self.config.get('DEFAULT', {})))
-        uploadable_hosts = self.get_configured_uploadable_image_hosts()
-        if not uploadable_hosts:
-            return filtered_config
-
-        for index in range(1, 10):
-            key = f'img_host_{index}'
-            if key in default_config:
-                default_config[key] = uploadable_hosts[index - 1] if index <= len(uploadable_hosts) else ''
-        filtered_config['DEFAULT'] = default_config
-        return filtered_config
-
-    def get_configured_uploadable_image_hosts(self) -> list[str]:
-        default_config = cast(dict[str, Any], self.config.get('DEFAULT', {}))
-        return [
-            str(default_config.get(f'img_host_{index}', '')).strip()
-            for index in range(1, 10)
-            if str(default_config.get(f'img_host_{index}', '')).strip() in self.uploadable_image_hosts
-        ]
-
-    def get_first_uploadable_image_host_index(self) -> int:
-        default_config = cast(dict[str, Any], self.config.get('DEFAULT', {}))
-        for index in range(1, 10):
-            host = str(default_config.get(f'img_host_{index}', '')).strip()
-            if host in self.uploadable_image_hosts:
-                return 1
-        return 1
 
     def normalise_image_host(self, url: str) -> str:
         hostname = urlparse(url.strip()).netloc.lower()
@@ -151,10 +121,6 @@ class BHD:
             return
 
         comparison_groups = cast(dict[str, Any], meta.get('comparison_groups') or {})
-        img_host_index = self.get_first_uploadable_image_host_index()
-        if not self.get_configured_uploadable_image_hosts():
-            console.print(f"[yellow]Could not rehost BHD comparison images: no uploadable BHD image host configured ({', '.join(self.uploadable_image_hosts)}).")
-            return
         changed = False
 
         for group_idx, group_data_raw in comparison_groups.items():
@@ -174,11 +140,11 @@ class BHD:
                 continue
 
             upload_meta = dict(meta)
-            upload_meta['imghost'] = str(cast(dict[str, Any], self.config.get('DEFAULT', {})).get(f'img_host_{img_host_index}', ''))
+            upload_meta['image_list'] = []
             uploaded_images, _ = await self.rehost_images_manager.uploadscreens_manager.upload_screens(
                 upload_meta,
                 len(image_paths),
-                img_host_index,
+                1,
                 0,
                 len(image_paths),
                 image_paths,
