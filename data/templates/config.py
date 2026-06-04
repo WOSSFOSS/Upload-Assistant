@@ -238,7 +238,7 @@ config = {
     "TORRENT_CLIENTS": {
         # Name your torrent clients here, for example, this example is named "Client1" and is set as default_torrent_client above
         # All options relate to the webui, make sure you have the webui secured if it has WAN access
-        # See https://github.com/fr1day13/Upload-Assistant/tree/nightly
+        # See https://github.com/fr1day13/Upload-Assistant
         "qbittorrent": {
             "torrent_client": "qbit",
             "enable_search": False,

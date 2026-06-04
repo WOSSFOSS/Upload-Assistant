@@ -230,7 +230,7 @@ class SPD:
 
         # Signature
         desc_parts.append(
-            f"[url=https://github.com/fr1day13/Upload-Assistant/tree/nightly]{meta.get('ua_signature', '')}[/url]"
+            f"[url=https://github.com/fr1day13/Upload-Assistant]{meta.get('ua_signature', '')}[/url]"
         )
 
         description = '\n\n'.join(part for part in desc_parts if part.strip())

@@ -633,7 +633,7 @@ class DescriptionBuilder:
 
         # UA Signature
         if not signature:
-            signature = f"[right][url=https://github.com/fr1day13/Upload-Assistant/tree/nightly][size=4]{meta['ua_signature']}[/size][/url][/right]"
+            signature = f"[right][url=https://github.com/fr1day13/Upload-Assistant][size=4]{meta['ua_signature']}[/size][/url][/right]"
             if self.tracker == "HUNO":
                 signature = signature.replace("[size=4]", "[size=8]")
         desc_parts.append(signature)

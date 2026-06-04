@@ -336,7 +336,7 @@ Enables an optional Discord bot.
 - `discord_channel_id` (str): Target channel.
 - `discord_bot_description` (str): Bot description.
 - `command_prefix` (str): Command prefix (example `!`).
-- See https://github.com/fr1day13/Upload-Assistant/tree/nightly
+- See https://github.com/fr1day13/Upload-Assistant
 
 ### Tracker overridable settings
 Tracker overridable settings are settings that you can add inside each tracker config dictionary; these settings override the values inside the DEFAULT config. In order for this to work, you must edit the config file, locate the tracker by name, and add your custom value.

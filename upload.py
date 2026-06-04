@@ -221,7 +221,7 @@ def _print_config_error(error_type: str, message: str, lineno: Optional[int] = N
         console.print(f"{_RED}  {message}{_RESET}", markup=False)
     if suggestion:
         console.print(f"{_GREEN}  Suggestion: {suggestion}{_RESET}", markup=False)
-    console.print(f"\n{_RED}Reference: https://github.com/fr1day13/Upload-Assistant/tree/nightly{_RESET}", markup=False)
+    console.print(f"\n{_RED}Reference: https://github.com/fr1day13/Upload-Assistant{_RESET}", markup=False)
 
 
 config: dict[str, Any]
@@ -319,7 +319,7 @@ if os.path.exists(_config_path):
 else:
     console.print(f"{_RED}Configuration file 'config.py' not found.{_RESET}", markup=False)
     console.print(f"{_RED}Please ensure the file is located at: {_YELLOW}{_config_path}{_RESET}", markup=False)
-    console.print(f"{_RED}Follow the setup instructions: https://github.com/fr1day13/Upload-Assistant/tree/nightly{_RESET}", markup=False)
+    console.print(f"{_RED}Follow the setup instructions: https://github.com/fr1day13/Upload-Assistant{_RESET}", markup=False)
     sys.exit(1)
 
 
@@ -859,7 +859,7 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
                             gc.collect()
                             cleanup_manager.reset_terminal()
                             if "workers" in str(e):
-                                console.print("[red]max workers issue, see https://github.com/fr1day13/Upload-Assistant/tree/nightly[/red]")
+                                console.print("[red]max workers issue, see https://github.com/fr1day13/Upload-Assistant[/red]")
                             raise Exception(f"Error during screenshot capture: {e}") from e
 
                 except asyncio.CancelledError as e:
@@ -1269,7 +1269,7 @@ def extract_changelog(content: str, to_version: str) -> Optional[str]:
 
 async def update_notification(base_dir: str) -> Optional[str]:
     version_file = os.path.join(base_dir, 'data', 'version.py')
-    remote_version_url = 'https://github.com/fr1day13/Upload-Assistant/tree/nightly'
+    remote_version_url = 'https://github.com/fr1day13/Upload-Assistant'
 
     notice = config['DEFAULT'].get('update_notification', True)
     verbose = config['DEFAULT'].get('verbose_notification', False)
@@ -1473,7 +1473,7 @@ async def do_the_thing(base_dir: str) -> None:
             for error in config_errors:
                 console.print(f"[red]  ✗ {error}[/red]")
             console.print("[red]\nPlease fix the above errors in your config.py[/red]")
-            console.print("[yellow]Reference: https://github.com/fr1day13/Upload-Assistant/tree/nightly[/yellow]")
+            console.print("[yellow]Reference: https://github.com/fr1day13/Upload-Assistant[/yellow]")
             raise SystemExit(1)
 
         if config_warnings:

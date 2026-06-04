@@ -16,9 +16,9 @@ After that enable this packages
 *Not sure which ones are absolutely essential but i got it working with the ones shown in screenshot, you can probably check by uninstalling some and see if it still works.
 ```
 2. open a terminal on unraid, cd to the directory you want to install Upload Assistant or make a directory.
-"git clone https://github.com/fr1day13/Upload-Assistant/tree/nightly" run the command,
+"git clone https://github.com/fr1day13/Upload-Assistant" run the command,
 the other stuff is standard steps you have to follow as per audionuts guide that can be found
-here https://github.com/fr1day13/Upload-Assistant/tree/nightly
+here https://github.com/fr1day13/Upload-Assistant
 ```
 ```
 3. you will need some missing packages that are not included with nerdtools.

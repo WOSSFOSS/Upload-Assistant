@@ -396,7 +396,7 @@ class BT:
         desc_parts.append(tonemapped_header)
 
         # Signature
-        desc_parts.append(f"[center][url=https://github.com/fr1day13/Upload-Assistant/tree/nightly]Upload realizado via {meta['ua_name']} {meta['current_version']}[/url][/center]")
+        desc_parts.append(f"[center][url=https://github.com/fr1day13/Upload-Assistant]Upload realizado via {meta['ua_name']} {meta['current_version']}[/url][/center]")
 
         description = '\n\n'.join(part for part in desc_parts if part.strip())
 

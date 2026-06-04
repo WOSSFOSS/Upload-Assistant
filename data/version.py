@@ -11,7 +11,7 @@ Release Notes for version v7.1.7 (2026-05-11):
 # * Fix key type for frame_info retrieval (#1363) by @GizmoBal in f384bc0
 # * Fix SP modq not being applied (#1364) by @brrbie in ffd4150
 # 
-# **Full Changelog**: https://github.com/fr1day13/Upload-Assistant/tree/nightly/compare/v7.1.6...v7.1.7
+# **Full Changelog**: https://github.com/fr1day13/Upload-Assistant/compare/v7.1.6...v7.1.7
 """
 
 
@@ -26,7 +26,7 @@ Release Notes for version v7.1.6 (2026-05-05):
 # * fix(GPW): update request data handling, add exclusive arg and auto upload posters (#1357) by @wastaken7 in 83a77d6
 # * BJS: limit director/creator fields to 1 person and fix type hint (#1358) by @wastaken7 in 7bdf433
 # 
-# **Full Changelog**: https://github.com/fr1day13/Upload-Assistant/tree/nightly/compare/v7.1.5...v7.1.6
+# **Full Changelog**: https://github.com/fr1day13/Upload-Assistant/compare/v7.1.5...v7.1.6
 """
 
 
