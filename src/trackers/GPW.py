@@ -62,6 +62,25 @@ class GPW:
 
         return await self.common.parseCookieFile(cookie_file)
 
+    @staticmethod
+    def extract_size_from_torrent_row(torrent_row: Any) -> str | None:
+        size_pattern = re.compile(r"\b\d+(?:[.,]\d+)?\s*(?:KiB|MiB|GiB|TiB|KB|MB|GB|TB)\b", re.IGNORECASE)
+
+        size_cells = torrent_row.select(
+            ".TableTorrent-cellStatSize, "
+            ".number_column, "
+            ".nobr, "
+            "td[class*='Size'], "
+            "td[class*='size']"
+        )
+        for cell in size_cells:
+            match = size_pattern.search(cell.get_text(" ", strip=True))
+            if match:
+                return match.group(0)
+
+        match = size_pattern.search(torrent_row.get_text(" ", strip=True))
+        return match.group(0) if match else None
+
     async def load_localized_data(self, meta: dict[str, Any]) -> None:
         localized_data_file = f'{meta["base_dir"]}/tmp/{meta["uuid"]}/tmdb_localized_data.json'
         main_ch_data: dict[str, Any] = {}
@@ -462,8 +481,7 @@ class GPW:
 
                         name = tooltip_value
 
-                        size_cell = torrent_row.find('td', class_='TableTorrent-cellStatSize')
-                        size = size_cell.get_text(strip=True) if size_cell else None
+                        size = self.extract_size_from_torrent_row(torrent_row)
 
                         href_value = title_link.get('href')
                         href_text = href_value if isinstance(href_value, str) else ''
