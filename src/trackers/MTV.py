@@ -112,6 +112,7 @@ class MTV:
         source_id = await self.get_source_id(meta)
         origin_id = await self.get_origin_id(meta)
         des_tags = await self.get_tags(meta)
+        await self.check_image_hosts(meta)
         await self.edit_desc(meta)
         group_desc = await self.edit_group_desc(meta)
         mtv_name = await self.edit_name(meta)
