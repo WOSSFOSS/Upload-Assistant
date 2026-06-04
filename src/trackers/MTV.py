@@ -728,62 +728,135 @@ class MTV:
                 return []
 
         dupes: list[dict[str, Any]] = []
+        seen_dupes: set[str] = set()
 
-        # Build request parameters
-        params = {
-            't': 'search',
-            'apikey': self.config['TRACKERS'][self.tracker]['api_key'].strip(),
-            'q': "",
-            'limit': "100"
-        }
+        def int_meta(key: str) -> int:
+            try:
+                return int(meta.get(key, 0) or 0)
+            except (TypeError, ValueError):
+                return 0
 
-        if meta['imdb_id'] != 0:
-            params['imdbid'] = "tt" + str(meta['imdb'])
-        elif meta['tmdb'] != 0:
-            params['tmdbid'] = str(meta['tmdb'])
-        elif meta['tvdb_id'] != 0:
-            params['tvdbid'] = str(meta['tvdb_id'])
-        else:
-            params['q'] = meta['title'].replace(': ', ' ').replace('’', '').replace("'", '')
+        def clean_search_text(value: Any) -> str:
+            text = os.path.splitext(os.path.basename(str(value or '')))[0]
+            text = text.replace('.', ' ').replace('_', ' ')
+            text = text.replace(': ', ' ').replace('’', '').replace("'", '')
+            text = re.sub(r'\s+', ' ', text)
+            return text.strip()
+
+        def release_group() -> str:
+            tag = str(meta.get('tag', '') or '').strip().lstrip('-')
+            if tag:
+                return tag
+            for key in ('name', 'uuid', 'path'):
+                text = os.path.splitext(os.path.basename(str(meta.get(key, '') or '')))[0]
+                match = re.search(r'-([A-Za-z0-9]+)$', text)
+                if match:
+                    return match.group(1)
+            return ''
+
+        def year_value() -> str:
+            for key in ('year', 'search_year'):
+                year = int_meta(key)
+                if year:
+                    return str(year)
+            imdb_info = meta.get('imdb_info')
+            if isinstance(imdb_info, dict):
+                year = imdb_info.get('year') or imdb_info.get('Year')
+                if year:
+                    match = re.search(r'\d{4}', str(year))
+                    if match:
+                        return match.group(0)
+            return ''
+
+        def build_params(query: dict[str, str]) -> dict[str, str]:
+            params = {
+                't': 'search',
+                'apikey': self.config['TRACKERS'][self.tracker]['api_key'].strip(),
+                'limit': '100'
+            }
+            params.update(query)
+            return params
+
+        search_queries: list[dict[str, str]] = []
+        imdb = int_meta('imdb')
+        if int_meta('imdb_id') != 0 and imdb:
+            search_queries.append({'imdbid': f'tt{imdb:07d}'})
+        elif int_meta('tmdb') != 0:
+            search_queries.append({'tmdbid': str(int_meta('tmdb'))})
+        elif int_meta('tvdb_id') != 0:
+            search_queries.append({'tvdbid': str(int_meta('tvdb_id'))})
+
+        title = clean_search_text(meta.get('title'))
+        year = year_value()
+        group = release_group()
+        text_queries = [
+            ' '.join(part for part in (title, year, group) if part),
+            ' '.join(part for part in (title, year) if part),
+            clean_search_text(meta.get('name')),
+            clean_search_text(meta.get('uuid')),
+            clean_search_text(meta.get('path')),
+        ]
+        for query in text_queries:
+            if query:
+                search_queries.append({'q': query})
+
+        deduped_queries: list[dict[str, str]] = []
+        seen_queries: set[tuple[tuple[str, str], ...]] = set()
+        for query in search_queries:
+            query_key = tuple(sorted(query.items()))
+            if query_key not in seen_queries:
+                seen_queries.add(query_key)
+                deduped_queries.append(query)
+
+        async def parse_torznab_response(response_text: str) -> None:
+            try:
+                loop = asyncio.get_running_loop()
+                response_xml = await loop.run_in_executor(None, ET.fromstring, response_text)
+                channel = cast(Optional[Any], response_xml.find('channel'))
+                if channel is None:
+                    return
+                for each in channel.findall('item'):
+                    title = str(each.findtext('title') or '')
+                    files_text = str(each.findtext('files') or '0')
+                    size_text = str(each.findtext('size') or '0')
+                    guid = str(each.findtext('guid') or '')
+                    link = str(each.findtext('link') or '')
+                    dupe_key = guid or link or title
+                    if dupe_key in seen_dupes:
+                        continue
+                    seen_dupes.add(dupe_key)
+                    result = {
+                        'name': title,
+                        'files': title,
+                        'file_count': int(files_text),
+                        'size': int(size_text),
+                        'link': guid,
+                        'download': link
+                    }
+                    dupes.append(result)
+            except ET.ParseError:
+                console.print("[red]Failed to parse XML response from MTV API")
 
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.get(url=self.search_url, params=params)
+                for query in deduped_queries:
+                    params = build_params(query)
+                    if meta.get('debug', False):
+                        debug_params = {key: value for key, value in params.items() if key != 'apikey'}
+                        console.print(f"[cyan]MTV dupe search params: {debug_params}[/cyan]")
+                    response = await client.get(url=self.search_url, params=params)
 
-                if response.status_code == 200 and response.text:
-                    # Parse XML response
-                    try:
-                        loop = asyncio.get_running_loop()
-                        response_xml = await loop.run_in_executor(None, ET.fromstring, response.text)
-                        channel = cast(Optional[Any], response_xml.find('channel'))
-                        if channel is None:
-                            return dupes
-                        for each in channel.findall('item'):
-                            title = str(each.findtext('title') or '')
-                            files_text = str(each.findtext('files') or '0')
-                            size_text = str(each.findtext('size') or '0')
-                            guid = str(each.findtext('guid') or '')
-                            link = str(each.findtext('link') or '')
-                            result = {
-                                'name': title,
-                                'files': title,
-                                'file_count': int(files_text),
-                                'size': int(size_text),
-                                'link': guid,
-                                'download': link
-                            }
-                            dupes.append(result)
-                    except ET.ParseError:
-                        console.print("[red]Failed to parse XML response from MTV API")
-                else:
-                    # Handle potential error messages
-                    if response.status_code != 200:
-                        console.print(f"[red]HTTP request failed. Status: {response.status_code}")
-                    elif 'status_message' in response.json():
-                        console.print(f"[yellow]{response.json().get('status_message')}")
-                        await asyncio.sleep(5)
+                    if response.status_code == 200 and response.text:
+                        await parse_torznab_response(response.text)
                     else:
-                        console.print("[red]Site Seems to be down or not responding to API")
+                        # Handle potential error messages
+                        if response.status_code != 200:
+                            console.print(f"[red]HTTP request failed. Status: {response.status_code}")
+                        elif 'status_message' in response.json():
+                            console.print(f"[yellow]{response.json().get('status_message')}")
+                            await asyncio.sleep(5)
+                        else:
+                            console.print("[red]Site Seems to be down or not responding to API")
         except httpx.TimeoutException:
             console.print("[red]Request timed out after 5 seconds")
         except httpx.RequestError as e:
