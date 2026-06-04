@@ -263,6 +263,7 @@ class DupeChecker:
                 matched_download_key = f"{tracker_name}_matched_download"
                 matched_reason_key = f"{tracker_name}_matched_reason"
                 matched_count_key = f"{tracker_name}_matched_file_count"
+                matched_size_key = f"{tracker_name}_matched_size"
                 matched_torrent_id = f"{tracker_name}_matched_id"
 
                 meta[matched_name_key] = entry.get('name')
@@ -273,6 +274,8 @@ class DupeChecker:
                 meta[matched_reason_key] = reason
                 if file_count:
                     meta[matched_count_key] = file_count
+                if entry.get('size') is not None:
+                    meta[matched_size_key] = entry.get('size')
                 if entry.get('id'):
                     meta[matched_torrent_id] = entry.get('id')
 
@@ -542,6 +545,7 @@ class DupeChecker:
                                         'id': entry_id,
                                         'name': each,
                                         'link': entry_link,
+                                        'size': entry.get('size'),
                                         'tracker': tracker_name,
                                         'internal': entry.get('internal', 0),
                                     })
@@ -565,6 +569,7 @@ class DupeChecker:
                     meta['season_pack_exists'] = True
                     meta['season_pack_name'] = each
                     meta['season_pack_link'] = entry.get('link')
+                    meta['season_pack_size'] = entry.get('size')
                     meta['season_pack_id'] = entry.get('id')
                     if meta.get('debug'):
                         console.log(f"[yellow]Season pack detected for episode upload: {each}")

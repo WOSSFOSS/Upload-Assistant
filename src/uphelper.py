@@ -1,6 +1,7 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import json
 import os
+import re
 import sys
 from collections.abc import Mapping
 from difflib import SequenceMatcher
@@ -27,11 +28,45 @@ class UploadHelper:
         self.tracker_class_map = cast(Mapping[str, Any], tracker_class_map)
 
     @staticmethod
-    def _format_source_size(size_bytes: Any) -> str:
+    def _size_to_bytes(size_value: Any) -> Optional[float]:
+        if size_value is None:
+            return None
+
+        if isinstance(size_value, (int, float)):
+            return float(size_value)
+
+        size_text = str(size_value).strip()
+        if not size_text:
+            return None
+
+        match = re.search(r"([0-9]+(?:[.,][0-9]+)?)\s*([kmgt]?i?b)?", size_text, flags=re.IGNORECASE)
+        if not match:
+            return None
+
         try:
-            size = float(size_bytes)
-        except (TypeError, ValueError):
-            size = 0.0
+            number = float(match.group(1).replace(',', '.'))
+        except ValueError:
+            return None
+
+        unit = (match.group(2) or "b").lower()
+        multipliers = {
+            "b": 1,
+            "kb": 1000,
+            "mb": 1000 ** 2,
+            "gb": 1000 ** 3,
+            "tb": 1000 ** 4,
+            "kib": 1024,
+            "mib": 1024 ** 2,
+            "gib": 1024 ** 3,
+            "tib": 1024 ** 4,
+        }
+        return number * multipliers.get(unit, 1)
+
+    @staticmethod
+    def _format_size(size_value: Any) -> Optional[str]:
+        size = UploadHelper._size_to_bytes(size_value)
+        if size is None:
+            return None
 
         gib = 1024 ** 3
         mib = 1024 ** 2
@@ -39,14 +74,22 @@ class UploadHelper:
             return f"{size / mib:.2f} MiB"
         return f"{size / gib:.2f} GiB"
 
+    @staticmethod
+    def _format_source_size(size_bytes: Any) -> str:
+        return UploadHelper._format_size(size_bytes) or "0.00 MiB"
+
     async def dupe_check(self, dupes: list[Union[DupeEntry, str]], meta: Meta, tracker_name: str) -> tuple[bool, Meta]:
         def _format_dupe(entry: Union[DupeEntry, str]) -> str:
             if isinstance(entry, dict):
                 name = str(entry.get('name', ''))
+                size = self._format_size(entry.get('size'))
                 link = entry.get('link')
+                parts = [name]
+                if size:
+                    parts.append(f"Size: {size}")
                 if isinstance(link, str) and link:
-                    return f"{name} - {link}"
-                return name
+                    parts.append(link)
+                return " - ".join(part for part in parts if part)
             return str(entry)
 
         dupes_list: list[Union[DupeEntry, str]] = dupes
@@ -155,7 +198,11 @@ class UploadHelper:
 
                 if not meta.get('were_trumping', False):
                     if meta.get('filename_match', False) and meta.get('file_count_match', False):
-                        console.print(f'[bold red]Exact match found! - {meta["filename_match"]}[/bold red]')
+                        exact_match_text = str(meta["filename_match"])
+                        exact_match_size = self._format_size(meta.get(f'{tracker_name}_matched_size'))
+                        if exact_match_size and "Size:" not in exact_match_text:
+                            exact_match_text = f"{exact_match_text} - Size: {exact_match_size}"
+                        console.print(f'[bold red]Exact match found! - {exact_match_text}[/bold red]')
                         try:
                             if tracker_name in ["AITHER", "LST"]:
                                 console.print(f"[yellow]{tracker_name} supports automatic trumping of exact matches, if the file is allowed to be trumped.[/yellow]")
@@ -181,7 +228,11 @@ class UploadHelper:
                             # Display only the matched season pack info from dupe_checking
                             season_pack_name = meta.get('season_pack_name', '')
                             season_pack_link = meta.get('season_pack_link')
-                            season_pack_text = f"{season_pack_name} - {season_pack_link}" if season_pack_link else season_pack_name
+                            season_pack_text = _format_dupe({
+                                'name': season_pack_name,
+                                'link': season_pack_link,
+                                'size': meta.get('season_pack_size'),
+                            })
                             console.print(f"[yellow]Note: A season pack exists on {tracker_name}[/yellow]")
                             console.print("[yellow]Ensure your upload is not part of that season pack, or is otherwise allowed.[/yellow]")
                             console.print()
