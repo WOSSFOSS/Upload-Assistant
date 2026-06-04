@@ -17,13 +17,8 @@ class ZNTH(UNIT3D):
         self.requests_url = f'{self.base_url}/api/requests/filter'
         self.search_url = f'{self.base_url}/api/torrents/filter'
         self.torrent_url = f'{self.base_url}/torrents/'
-        self.banned_groups = [
-            'd3g', 'FGT', 'ION10', 'MeGusta', 'RARBG', 'YIFY', 'YTS', 'AROMA', 'DNL', 'Hi10', 'LAMA',
-            'nikt0', 'x0r', '4K4U', 'Alcaide_Kira', 'aXXo', 'BRrip', 'CM8', 'CrEwSaDe', 'EVO',
-            'FaNGDiNG0', 'FRDS', 'HD2DVD', 'HDTime', 'iPlanet', 'KiNGDOM', 'mHD', 'mSD', 'NhaNc3',
-            'nHD', 'nSD', 'OFT', 'PRODJi', 'SANTi', 'SPDVD', 'STUTTERSHIT', 'Telly', 'TGx', 'TSP',
-            'TSPxL', 'WAF', 'GalaxyTV',
-        ]
+        self.banned_url = f'{self.base_url}/api/bannedReleaseGroups'
+        self.banned_groups: list[str] = []
 
     async def get_name(self, meta: dict[str, Any]) -> dict[str, str]:
         znth_name = meta['name']
