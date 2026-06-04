@@ -440,6 +440,12 @@ class GPW:
             ajax_dupes = await self.search_existing_ajax(meta, cookies, imdb)
             if ajax_dupes:
                 return ajax_dupes
+        elif meta.get('debug'):
+            console.print(f"[yellow]{self.tracker}: No cookies found, trying API browse search before fallbacks.[/yellow]")
+
+        api_browse_dupes = await self.search_existing_api_browse(meta, imdb)
+        if api_browse_dupes:
+            return api_browse_dupes
 
         group_id = await self.get_groupid(meta)
         if not group_id:
@@ -642,6 +648,37 @@ class GPW:
 
         return [dupe for dupe in dupes if dupe.get('name')]
 
+    async def search_existing_api_browse(self, meta: dict[str, Any], imdb: Any) -> list[dict[str, Any]]:
+        imdb_id = self.format_imdb_id(imdb)
+        if not imdb_id:
+            return []
+
+        params = {
+            'api_key': self.api_key,
+            'action': 'browse',
+            'order_by': 'time',
+            'order_way': 'desc',
+            'searchstr': imdb_id,
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=30, headers={'User-Agent': 'Upload Assistant/2.3'}) as client:
+                response = await client.get(f'{self.base_url}/api.php', params=params)
+                response.raise_for_status()
+                payload = response.json()
+        except Exception as e:
+            if meta.get('debug'):
+                console.print(f"[yellow]{self.tracker}: API browse search failed: {e}[/yellow]", markup=False)
+            return []
+
+        dupes = self.parse_browse_response(payload)
+        if meta.get('debug') and not dupes:
+            payload_keys = list(payload.keys()) if isinstance(payload, dict) else type(payload).__name__
+            response_data = payload.get('response') if isinstance(payload, dict) else None
+            response_keys = list(response_data.keys()) if isinstance(response_data, dict) else type(response_data).__name__
+            console.print(f"[yellow]{self.tracker}: API browse returned no parsed dupes. payload={payload_keys}, response={response_keys}[/yellow]", markup=False)
+        return dupes
+
     async def get_group_torrents_from_api(self, meta: dict[str, Any], group_id: str) -> list[dict[str, Any]]:
         if not group_id:
             return []
@@ -680,6 +717,65 @@ class GPW:
                 console.print(f"[yellow]{self.tracker}: Could not fetch group torrents from API: {e}[/yellow]", markup=False)
 
         return []
+
+    def parse_browse_response(self, payload: Any) -> list[dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return []
+
+        response_data = payload.get('response', payload)
+        if not isinstance(response_data, dict):
+            return []
+
+        results = (
+            response_data.get('results')
+            or response_data.get('Results')
+            or response_data.get('movies')
+            or response_data.get('Movies')
+            or []
+        )
+        if not isinstance(results, list):
+            return []
+
+        dupes: list[dict[str, Any]] = []
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+
+            group_id = self.first_present(result, ('groupId', 'GroupId', 'groupID', 'GroupID', 'group_id', 'ID', 'id'))
+            torrents = result.get('torrents') or result.get('Torrents') or []
+            if not isinstance(torrents, list):
+                continue
+
+            for torrent in torrents:
+                if not isinstance(torrent, dict):
+                    continue
+
+                torrent_id = self.first_present(torrent, ('torrentId', 'TorrentId', 'torrentID', 'TorrentID', 'id', 'ID'))
+                name = (
+                    torrent.get('fileName')
+                    or torrent.get('FileName')
+                    or torrent.get('releaseName')
+                    or torrent.get('ReleaseName')
+                    or self.format_existing_torrent_name(torrent)
+                )
+                link = None
+                if group_id and torrent_id:
+                    link = f'{self.base_url}/torrents.php?id={group_id}&torrentid={torrent_id}'
+                elif torrent_id:
+                    link = f'{self.torrent_url}{torrent_id}'
+
+                dupes.append({
+                    'name': str(name).strip(),
+                    'size': self.first_present(torrent, ('size', 'Size', 'fileSize', 'FileSize', 'file_size', 'filesize', 'Bytes', 'bytes')),
+                    'link': link,
+                    'id': torrent_id,
+                    'seeders': self.first_present(torrent, ('seeders', 'Seeders')),
+                    'leechers': self.first_present(torrent, ('leechers', 'Leechers')),
+                    'files': [],
+                    'file_count': self.first_present(torrent, ('fileCount', 'FileCount', 'file_count')),
+                })
+
+        return [dupe for dupe in dupes if dupe.get('name')]
 
     def parse_existing_torrents_from_soup(self, soup: Any) -> list[dict[str, Any]]:
         found_items: list[dict[str, Any]] = []
