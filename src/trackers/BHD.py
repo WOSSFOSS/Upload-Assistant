@@ -1,9 +1,11 @@
 # Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
+import json
 import os
 import platform
 import re
 from typing import Any, Optional, Union, cast
+from urllib.parse import urlparse
 
 import aiofiles
 import cli_ui
@@ -35,27 +37,169 @@ class BHD:
         api_key = str(self.tracker_config.get('api_key', '')).strip()
         self.requests_url = f"https://beyond-hd.me/api/requests/{api_key}"
         self.banned_groups = ['Sicario', 'TOMMY', 'x0r', 'nikt0', 'FGT', 'd3g', 'MeGusta', 'YIFY', 'tigole', 'TEKNO3D', 'C4K', 'RARBG', '4K4U', 'EASports', 'ReaLHD', 'Telly', 'AOC', 'WKS', 'SasukeducK', 'CRUCiBLE', 'iFT', 'ProRes', 'MezRips', 'Flights', 'BiTOR', 'iVy', 'QxR', 'SyncUP', 'OFT', 'TGS']
-        self.approved_image_hosts = ['ptpimg', 'imgbox', 'imgbb', 'pixhost', 'bhd', 'bam']
+        self.approved_image_hosts = ['imgbox', 'imgbb', 'pixhost', 'bhd', 'bam']
+        self.uploadable_image_hosts = ['imgbox', 'imgbb', 'pixhost']
         pass
 
-    async def check_image_hosts(self, meta: dict[str, Any]) -> None:
-        url_host_mapping = {
+    def get_image_host_mapping(self) -> dict[str, str]:
+        return {
             "ibb.co": "imgbb",
-            "ptpimg.me": "ptpimg",
+            "i.ibb.co": "imgbb",
+            "imgbb.com": "imgbb",
             "pixhost.to": "pixhost",
             "imgbox.com": "imgbox",
+            "images2.imgbox.com": "imgbox",
             "beyondhd.co": "bhd",
+            "beyond-hd.me": "bhd",
             "imagebam.com": "bam",
+            "www.imagebam.com": "bam",
         }
 
-        await self.rehost_images_manager.check_hosts(
+    async def check_image_hosts(self, meta: dict[str, Any]) -> None:
+        rehost_images_manager = RehostImagesManager(self.get_uploadable_image_host_config())
+        await rehost_images_manager.check_hosts(
             meta,
             self.tracker,
-            url_host_mapping=url_host_mapping,
-            img_host_index=1,
+            url_host_mapping=self.get_image_host_mapping(),
+            img_host_index=self.get_first_uploadable_image_host_index(),
             approved_image_hosts=self.approved_image_hosts,
         )
         return None
+
+    def get_uploadable_image_host_config(self) -> dict[str, Any]:
+        filtered_config = dict(self.config)
+        default_config = dict(cast(dict[str, Any], self.config.get('DEFAULT', {})))
+        uploadable_hosts = self.get_configured_uploadable_image_hosts()
+        if not uploadable_hosts:
+            return filtered_config
+
+        for index in range(1, 10):
+            key = f'img_host_{index}'
+            if key in default_config:
+                default_config[key] = uploadable_hosts[index - 1] if index <= len(uploadable_hosts) else ''
+        filtered_config['DEFAULT'] = default_config
+        return filtered_config
+
+    def get_configured_uploadable_image_hosts(self) -> list[str]:
+        default_config = cast(dict[str, Any], self.config.get('DEFAULT', {}))
+        return [
+            str(default_config.get(f'img_host_{index}', '')).strip()
+            for index in range(1, 10)
+            if str(default_config.get(f'img_host_{index}', '')).strip() in self.uploadable_image_hosts
+        ]
+
+    def get_first_uploadable_image_host_index(self) -> int:
+        default_config = cast(dict[str, Any], self.config.get('DEFAULT', {}))
+        for index in range(1, 10):
+            host = str(default_config.get(f'img_host_{index}', '')).strip()
+            if host in self.uploadable_image_hosts:
+                return 1
+        return 1
+
+    def normalise_image_host(self, url: str) -> str:
+        hostname = urlparse(url.strip()).netloc.lower()
+        hostname = hostname[4:] if hostname.startswith('www.') else hostname
+        for known_host, approved_name in self.get_image_host_mapping().items():
+            known_host = known_host.lower()
+            if hostname == known_host or hostname.endswith(f'.{known_host}'):
+                return approved_name
+        return hostname
+
+    def is_approved_image_url(self, url: str) -> bool:
+        if not url.lower().startswith(('http://', 'https://')):
+            return False
+        return self.normalise_image_host(url) in self.approved_image_hosts
+
+    def remove_unapproved_image_hosts_from_desc(self, description: str) -> str:
+        def keep_or_remove_url_img(match: re.Match[str]) -> str:
+            image_url = match.group('image_url').strip()
+            return match.group(0) if self.is_approved_image_url(image_url) else ''
+
+        def keep_or_remove_img(match: re.Match[str]) -> str:
+            image_url = match.group('image_url').strip()
+            return match.group(0) if self.is_approved_image_url(image_url) else ''
+
+        # Remove linked image blocks first, so a wrapped [url][img] block is removed as a whole.
+        description = re.sub(
+            r'\[url=[^\]]+\]\s*\[img[^\]]*\](?P<image_url>https?://[^\[]+?)\[/img\]\s*\[/url\]',
+            keep_or_remove_url_img,
+            description,
+            flags=re.IGNORECASE,
+        )
+        description = re.sub(
+            r'\[img[^\]]*\](?P<image_url>https?://[^\[]+?)\[/img\]',
+            keep_or_remove_img,
+            description,
+            flags=re.IGNORECASE,
+        )
+        return description
+
+    def get_approved_images(self, images: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        approved_images: list[dict[str, Any]] = []
+        for image in images:
+            raw_url = str(image.get('raw_url') or image.get('img_url') or '')
+            if raw_url and self.is_approved_image_url(raw_url):
+                approved_images.append(image)
+        return approved_images
+
+    async def rehost_comparison_images(self, meta: dict[str, Any]) -> None:
+        if not meta.get('comparison') or not meta.get('comparison_groups'):
+            return
+
+        comparison_path = str(meta.get('comparison') or '')
+        if not os.path.isdir(comparison_path):
+            return
+
+        comparison_groups = cast(dict[str, Any], meta.get('comparison_groups') or {})
+        img_host_index = self.get_first_uploadable_image_host_index()
+        if not self.get_configured_uploadable_image_hosts():
+            console.print(f"[yellow]Could not rehost BHD comparison images: no uploadable BHD image host configured ({', '.join(self.uploadable_image_hosts)}).")
+            return
+        changed = False
+
+        for group_idx, group_data_raw in comparison_groups.items():
+            group_data = cast(dict[str, Any], group_data_raw)
+            urls = cast(list[dict[str, Any]], group_data.get('urls') or [])
+            if urls and all(self.is_approved_image_url(str(url.get('raw_url') or url.get('img_url') or '')) for url in urls):
+                continue
+
+            files = [str(file) for file in cast(list[Any], group_data.get('files') or []) if file]
+            image_paths = [
+                file if os.path.isabs(file) else os.path.join(comparison_path, file)
+                for file in files
+            ]
+            image_paths = [path for path in image_paths if os.path.exists(path)]
+            if not image_paths:
+                console.print(f"[yellow]Could not rehost BHD comparison group {group_idx}: no local image files found.")
+                continue
+
+            upload_meta = dict(meta)
+            upload_meta['imghost'] = str(cast(dict[str, Any], self.config.get('DEFAULT', {})).get(f'img_host_{img_host_index}', ''))
+            uploaded_images, _ = await self.rehost_images_manager.uploadscreens_manager.upload_screens(
+                upload_meta,
+                len(image_paths),
+                img_host_index,
+                0,
+                len(image_paths),
+                image_paths,
+                {},
+                allowed_hosts=self.uploadable_image_hosts,
+            )
+            approved_uploaded = self.get_approved_images(cast(list[dict[str, Any]], uploaded_images))
+            if approved_uploaded:
+                group_data['urls'] = approved_uploaded
+                changed = True
+                console.print(f"[green]Rehosted BHD comparison group {group_idx} to an approved image host.")
+            else:
+                console.print(f"[yellow]Could not rehost BHD comparison group {group_idx} to an approved image host.")
+
+        if changed:
+            comparison_data_file = f"{meta['base_dir']}/tmp/{meta['uuid']}/comparison_data.json"
+            try:
+                async with aiofiles.open(comparison_data_file, 'w', encoding='utf-8') as f:
+                    await f.write(json.dumps(comparison_groups, indent=4))
+            except Exception as e:
+                console.print(f"[yellow]Failed to save updated BHD comparison data: {e}")
 
     async def upload(self, meta: dict[str, Any], _disctype: str) -> bool:
         common = COMMON(config=self.config)
@@ -64,6 +208,8 @@ class BHD:
         source_id = await self.get_source(str(meta['source']))
         type_id = await self.get_type(meta)
         draft = await self.get_live(meta)
+        await self.check_image_hosts(meta)
+        await self.rehost_comparison_images(meta)
         await self.edit_desc(meta)
         tags = await self.get_tags(meta)
         custom, edition = await self.get_edition(meta, tags)
@@ -265,6 +411,7 @@ class BHD:
                             await desc.write(f"{each['name']}:\n")
                             await desc.write(f"[spoiler={os.path.basename(each['largest_evo'])}][code][{each['evo_mi']}[/code][/spoiler]\n")
                             await desc.write("\n")
+            base = self.remove_unapproved_image_hosts_from_desc(base)
             await desc.write(base.replace("[img]", "[img width=300]"))
             if meta.get('comparison') and meta.get('comparison_groups'):
                 await desc.write("[center]")
@@ -294,7 +441,10 @@ class BHD:
                         if img_idx < len(urls):
                             img_url = urls[img_idx].get('raw_url', '')
                             if img_url:
-                                await desc.write(f"{img_url}\n")
+                                if self.is_approved_image_url(img_url):
+                                    await desc.write(f"{img_url}\n")
+                                else:
+                                    console.print(f"[yellow]Removed unsupported BHD comparison image host: {img_url}")
 
                 await desc.write("[/comparison][/center]\n\n")
             try:
@@ -304,12 +454,20 @@ class BHD:
                     await desc.write("\n\n")
             except Exception as e:
                 console.print(f"[yellow]Warning: Error setting tonemapped header: {str(e)}[/yellow]")
-            images = cast(list[dict[str, Any]], meta.get(f'{self.tracker}_images_key') or meta.get('image_list') or [])
+            images = cast(list[dict[str, Any]], meta.get(f'{self.tracker}_images_key') or [])
+            if not images:
+                images = self.get_approved_images(cast(list[dict[str, Any]], meta.get('image_list') or []))
+                if images and meta.get('debug'):
+                    console.print(f"[green]Using approved existing images for {self.tracker}.")
             if len(images) > 0:
                 await desc.write("[align=center]")
                 for each in range(len(images[:int(meta['screens'])])):
                     web_url = images[each]['web_url']
                     img_url = images[each]['img_url']
+                    raw_url = str(images[each].get('raw_url') or img_url)
+                    if not self.is_approved_image_url(raw_url):
+                        console.print(f"[yellow]Skipping unsupported BHD image host in description: {raw_url}")
+                        continue
                     if (each == len(images) - 1):
                         await desc.write(f"[url={web_url}][img width=350]{img_url}[/img][/url]")
                     elif (each + 1) % 2 == 0:
