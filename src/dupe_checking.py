@@ -18,6 +18,8 @@ class DupeEntry(TypedDict, total=False):
     size: Optional[Union[int, str]]
     files: list[str]
     file_count: int
+    seeders: Optional[Union[int, str]]
+    leechers: Optional[Union[int, str]]
     trumpable: bool
     link: Optional[str]
     download: Optional[str]
@@ -87,6 +89,8 @@ class DupeChecker:
                     'size': None,
                     'files': [],
                     'file_count': 0,
+                    'seeders': None,
+                    'leechers': None,
                     'trumpable': False,
                     'link': None,
                     'download': None,
@@ -128,6 +132,8 @@ class DupeChecker:
                     "TorrentId",
                     "torrentId",
                 ))
+                seeders_value = self._first_present(raw_entry, ("seeders", "Seeders", "seed", "Seed"))
+                leechers_value = self._first_present(raw_entry, ("leechers", "Leechers", "leech", "Leech"))
 
                 # Create a base entry with default values
                 entry: DupeEntry = {
@@ -135,6 +141,8 @@ class DupeChecker:
                     'size': size_value,
                     'files': [],
                     'file_count': 0,
+                    'seeders': seeders_value,
+                    'leechers': leechers_value,
                     'trumpable': bool(d.get('trumpable', False)),
                     'link': link_value,
                     'download': download_value,
