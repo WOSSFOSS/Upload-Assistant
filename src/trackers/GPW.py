@@ -403,10 +403,32 @@ class GPW:
                             processing = item_dict.get('Processing', '')
                             remaster = item_dict.get('RemasterTitle', '')
                             codec = item_dict.get('Codec', '')
+                            torrent_id = (
+                                item_dict.get('TorrentID')
+                                or item_dict.get('TorrentId')
+                                or item_dict.get('torrentId')
+                                or item_dict.get('torrent_id')
+                                or item_dict.get('ID')
+                                or item_dict.get('Id')
+                                or item_dict.get('id')
+                            )
+                            size = item_dict.get('Size') or item_dict.get('size')
+                            link = (
+                                item_dict.get('Link')
+                                or item_dict.get('link')
+                                or item_dict.get('Url')
+                                or item_dict.get('URL')
+                                or item_dict.get('url')
+                                or (f'{self.torrent_url}{torrent_id}' if torrent_id else None)
+                            )
 
                             formatted = f'{name} {year} {resolution} {source} {processing} {remaster} {codec}'.strip()
                             formatted = re.sub(r'\s{2,}', ' ', formatted)
-                            dupes.append({"name": formatted})
+                            dupes.append({
+                                "name": formatted,
+                                "size": size,
+                                "link": link,
+                            })
                         return dupes
                     else:
                         return []
