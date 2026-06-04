@@ -92,10 +92,24 @@ class UploadHelper:
                 return " - ".join(part for part in parts if part)
             return str(entry)
 
+        def _print_other_uploads() -> None:
+            other_uploads = [
+                entry
+                for entry in cast(list[Union[DupeEntry, str]], meta.get(f'{tracker_name}_other_uploads', []))
+                if isinstance(entry, (dict, str))
+            ]
+            if not other_uploads:
+                return
+
+            console.print(f"[bold blue]Other uploads:[/bold blue] [yellow]{tracker_name}[/yellow]")
+            console.print()
+            console.print(f"[bold cyan]{chr(10).join(_format_dupe(entry) for entry in other_uploads)}[/bold cyan]")
+
         dupes_list: list[Union[DupeEntry, str]] = dupes
         upload: bool = False
         meta['were_trumping'] = False
         if not dupes_list:
+            _print_other_uploads()
             if meta['debug']:
                 console.print(f"[green]No dupes found at[/green] [yellow]{tracker_name}[/yellow]")
             return False,  meta
@@ -241,6 +255,7 @@ class UploadHelper:
                             console.print(f"[bold blue]Check if these are actually dupes from {tracker_name}:[/bold blue]")
                             console.print()
                             console.print(f"[bold cyan]{dupe_text}[/bold cyan]")
+                            _print_other_uploads()
                         if meta.get('dupe', False) is False:
                             try:
                                 if meta.get('is_disc') == "BDMV":

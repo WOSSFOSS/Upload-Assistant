@@ -163,6 +163,8 @@ class DupeChecker:
 
                 processed_dupes.append(entry)
 
+        meta[f'{tracker_name}_search_results'] = processed_dupes
+
         def coerce_int(value: Any) -> Optional[int]:
             try:
                 return int(value) if value is not None else None
@@ -648,6 +650,23 @@ class DupeChecker:
             return False
 
         new_dupes = [each for each in processed_dupes if not await process_exclusion(each)]
+        dupe_keys = {
+            (
+                str(dupe.get('id') or ''),
+                str(dupe.get('link') or ''),
+                str(dupe.get('name') or ''),
+            )
+            for dupe in new_dupes
+        }
+        meta[f'{tracker_name}_other_uploads'] = [
+            dupe
+            for dupe in processed_dupes
+            if (
+                str(dupe.get('id') or ''),
+                str(dupe.get('link') or ''),
+                str(dupe.get('name') or ''),
+            ) not in dupe_keys
+        ]
 
         if new_dupes and not meta.get('unattended', False) and meta.get('debug'):
             if len(processed_dupes) > 1:
