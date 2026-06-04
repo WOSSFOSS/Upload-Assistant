@@ -36,7 +36,10 @@ class GPW:
         self.torrent_url = f'{self.base_url}/torrents.php?torrentid='
         self.announce = self.tracker_config.get('announce_url', '')
         self.api_key = self.tracker_config.get('api_key', '')
+        self.username = str(self.tracker_config.get('username', '')).strip()
+        self.password = str(self.tracker_config.get('password', '')).strip()
         self.auth_token = None
+        self.user_agent = 'Upload Assistant/2.3'
         self.tmdb_data: dict[str, Any] = {}
         self.banned_groups = [
             "ALT", "aXXo", "BATWEB", "BlackTV", "BitsTV", "BMDRu", "BRrip", "CM8", "CrEwSaDe", "CTFOH", "CTRLHD",
@@ -61,6 +64,53 @@ class GPW:
             return False
 
         return await self.common.parseCookieFile(cookie_file)
+
+    @staticmethod
+    def first_present(entry: dict[str, Any], keys: tuple[str, ...]) -> Any:
+        for key in keys:
+            value = entry.get(key)
+            if value not in (None, ""):
+                return value
+        return None
+
+    @staticmethod
+    def format_imdb_id(imdb: Any) -> str:
+        imdb_text = str(imdb or '').strip()
+        if not imdb_text:
+            return ''
+        if imdb_text.lower().startswith('tt'):
+            return imdb_text
+        return f"tt{int(imdb_text):07d}" if imdb_text.isdigit() else imdb_text
+
+    async def login(self, client: httpx.AsyncClient, meta: dict[str, Any]) -> bool:
+        if not self.username or not self.password:
+            if meta.get('debug'):
+                console.print(f"[yellow]{self.tracker}: No username/password configured for session search.[/yellow]")
+            return False
+
+        data = {
+            'username': self.username,
+            'password': self.password,
+            'keeplogged': '1',
+        }
+        headers = {
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Referer': f'{self.base_url}/login.php',
+            'User-Agent': self.user_agent,
+        }
+
+        try:
+            response = await client.post(f'{self.base_url}/login.php', data=data, headers=headers)
+            response.raise_for_status()
+        except httpx.HTTPError as e:
+            console.print(f"[red]{self.tracker}: Login request failed: {e}[/red]", markup=False)
+            return False
+
+        if 'login.php' in str(response.url) or 'bad credentials' in response.text.lower():
+            console.print(f"[red]{self.tracker}: Login failed. Check username/password.[/red]")
+            return False
+
+        return True
 
     async def load_localized_data(self, meta: dict[str, Any]) -> None:
         localized_data_file = f'{meta["base_dir"]}/tmp/{meta["uuid"]}/tmdb_localized_data.json'
@@ -370,92 +420,133 @@ class GPW:
             meta["skipping"] = "GPW"
             return []
 
-        group_id = await self.get_groupid(meta)
-        if not group_id:
-            return []
-
         imdb = dict(meta.get("imdb_info", {})).get("imdbID", "")
         if not imdb:
             console.print(f"{self.tracker}: IMDb ID not found in metadata. Skipping search.")
             return []
 
         cookies = await self.load_cookies(meta)
-        if not cookies:
-            search_url = f'{self.base_url}/api.php?api_key={self.api_key}&action=torrent&imdbID={imdb}'
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    response = await client.get(search_url)
-                    response.raise_for_status()
-                    data = response.json()
-                    data_dict = cast(dict[str, Any], data) if isinstance(data, dict) else {}
 
-                    if data_dict.get("status") == 200 and "response" in data_dict:
-                        response_list_raw = data_dict.get('response')
-                        response_list = cast(list[Any], response_list_raw) if isinstance(response_list_raw, list) else []
-                        for item in response_list:
-                            if not isinstance(item, dict):
-                                continue
-                            item_dict = cast(dict[str, Any], item)
-                            dupes.append({
-                                "name": self.format_existing_torrent_name(item_dict),
-                                "link": None,
-                            })
-                        return dupes
-                    else:
-                        return []
-            except Exception as e:
-                console.print(f'An unexpected error occurred while processing the search: {e}', markup=False)
+        try:
+            async with httpx.AsyncClient(
+                cookies=cookies or None,
+                timeout=30,
+                headers={'User-Agent': self.user_agent},
+                follow_redirects=True,
+            ) as client:
+                if not cookies and not await self.login(client, meta):
+                    return await self.search_existing_api(meta, imdb)
+
+                dupes = await self.search_existing_ajax(meta, client, imdb)
+                if dupes:
+                    if GPW.group_id:
+                        await self.get_slots(meta, client, GPW.group_id)
+                    return dupes
+
+        except Exception as e:
+            console.print(f'An unexpected error occurred while processing the session search: {e}', markup=False)
+
+        return await self.search_existing_api(meta, imdb)
+
+    async def search_existing_api(self, meta: dict[str, Any], imdb: Any) -> list[dict[str, Any]]:
+        dupes: list[dict[str, Any]] = []
+        search_url = f'{self.base_url}/api.php?api_key={self.api_key}&action=torrent&imdbID={imdb}'
+        try:
+            async with httpx.AsyncClient(timeout=30) as client:
+                response = await client.get(search_url)
+                response.raise_for_status()
+                data = response.json()
+                data_dict = cast(dict[str, Any], data) if isinstance(data, dict) else {}
+
+                if data_dict.get("status") == 200 and "response" in data_dict:
+                    response_list_raw = data_dict.get('response')
+                    response_list = cast(list[Any], response_list_raw) if isinstance(response_list_raw, list) else []
+                    for item in response_list:
+                        if not isinstance(item, dict):
+                            continue
+                        item_dict = cast(dict[str, Any], item)
+                        dupes.append({
+                            "name": self.format_existing_torrent_name(item_dict),
+                            "link": None,
+                        })
+                    return dupes
+        except Exception as e:
+            console.print(f'An unexpected error occurred while processing the API search: {e}', markup=False)
+
+        return []
+
+    async def search_existing_ajax(self, meta: dict[str, Any], client: httpx.AsyncClient, imdb: Any) -> list[dict[str, Any]]:
+        imdb_id = self.format_imdb_id(imdb)
+        if not imdb_id:
             return []
 
-        else:
-            imdb_value = str(imdb or '')
-            search_url = f'{self.base_url}/torrents.php?groupname={imdb_value.upper()}'  # using TT in imdb returns the search page instead of redirecting to the group page
-            found_items: list[dict[str, Any]] = []
+        params = {
+            'action': 'browse',
+            'order_by': 'time',
+            'order_way': 'desc',
+            'searchstr': imdb_id,
+        }
 
-            try:
-                async with httpx.AsyncClient(cookies=cookies, timeout=30, headers={'User-Agent': 'Upload Assistant/2.3'}) as client:
-                    response = await client.get(search_url)
-                    response.raise_for_status()
-                    soup = BeautifulSoup(response.text, 'html.parser')
+        try:
+            response = await client.get(f'{self.base_url}/ajax.php', params=params)
+            response.raise_for_status()
+            payload = response.json()
+        except Exception as e:
+            if meta.get('debug'):
+                console.print(f"[yellow]{self.tracker}: AJAX search failed: {e}[/yellow]", markup=False)
+            return []
 
-                    group_url = f'{self.base_url}/torrents.php?id={GPW.group_id}'
-                    group_response = await client.get(group_url)
-                    group_response.raise_for_status()
-                    group_soup = BeautifulSoup(group_response.text, 'html.parser')
-                    group_items = self.parse_existing_torrents_from_soup(group_soup)
-                    if group_items:
-                        await self.get_slots(meta, client, GPW.group_id)
-                        return group_items
+        return self.parse_ajax_results(payload)
 
-                    torrent_table = soup.find('table', id='torrent_table')
-                    if not torrent_table:
-                        return []
+    def parse_ajax_results(self, payload: Any) -> list[dict[str, Any]]:
+        if not isinstance(payload, dict):
+            return []
 
-                    for torrent_row in torrent_table.find_all('tr', class_='TableTorrent-rowTitle'):
-                        title_link = torrent_row.find('a', href=re.compile(r'torrentid=\d+'))
-                        if not title_link:
-                            continue
+        response_data = payload.get('response')
+        if not isinstance(response_data, dict):
+            return []
 
-                        tooltip_value = title_link.get('data-tooltip')
-                        if not isinstance(tooltip_value, str):
-                            continue
+        results_value = response_data.get('results') or response_data.get('Results') or []
+        results = cast(list[Any], results_value) if isinstance(results_value, list) else []
+        dupes: list[dict[str, Any]] = []
 
-                        found_items.append({
-                            'name': tooltip_value,
-                            'link': None,
-                        })
+        for result in results:
+            if not isinstance(result, dict):
+                continue
+            result_dict = cast(dict[str, Any], result)
+            group_id = self.first_present(result_dict, ('groupId', 'GroupId', 'groupID', 'GroupID', 'group_id', 'ID', 'id'))
+            if group_id and not GPW.group_id:
+                GPW.group_id = str(group_id)
 
-                    if found_items:
-                        await self.get_slots(meta, client, GPW.group_id)
+            torrents_value = result_dict.get('torrents') or result_dict.get('Torrents') or []
+            torrents = cast(list[Any], torrents_value) if isinstance(torrents_value, list) else []
+            for torrent in torrents:
+                if not isinstance(torrent, dict):
+                    continue
+                torrent_dict = cast(dict[str, Any], torrent)
+                torrent_id = self.first_present(torrent_dict, ('torrentId', 'TorrentId', 'torrentID', 'TorrentID', 'id', 'ID'))
+                name = (
+                    torrent_dict.get('fileName')
+                    or torrent_dict.get('FileName')
+                    or torrent_dict.get('releaseName')
+                    or torrent_dict.get('ReleaseName')
+                    or self.format_existing_torrent_name(torrent_dict)
+                )
+                if not name:
+                    continue
 
-                    return found_items
+                link = None
+                if group_id and torrent_id:
+                    link = f'{self.base_url}/torrents.php?id={group_id}&torrentid={torrent_id}'
 
-            except httpx.HTTPError as e:
-                console.print(f'An HTTP error occurred: {e}', markup=False)
-                return []
-            except Exception as e:
-                console.print(f'An unexpected error occurred while processing the search: {e}', markup=False)
-                return []
+                dupes.append({
+                    'name': str(name).strip(),
+                    'size': self.first_present(torrent_dict, ('size', 'Size', 'fileSize', 'FileSize', 'file_size', 'filesize', 'Bytes', 'bytes')),
+                    'link': link,
+                    'id': torrent_id,
+                })
+
+        return dupes
 
     async def get_slots(self, meta: dict[str, Any], client: httpx.AsyncClient, group_id: str) -> None:
         url = f'{self.base_url}/torrents.php?id={group_id}'

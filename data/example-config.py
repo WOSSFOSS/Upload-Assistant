@@ -565,6 +565,9 @@ config = {
             "link_dir_name": "",
             # You can find your API key in Profile Settings -> Access Settings -> API Key. If there is no API, click "Reset your api key" and Save Profile.
             "api_key": "",
+            # Used for session-based duplicate searches via ajax.php. This returns full torrent details like size and torrent ID.
+            "username": "",
+            "password": "",
             # Optionally, you can export cookies from GPW to improve duplicate searches.
             # If you do this, you must export cookies from https://greatposterwall.com using https://addons.mozilla.org/en-US/firefox/addon/export-cookies-txt/
             # Cookies must be in Netscape format and must be located in data/cookies/GPW.txt
