@@ -977,6 +977,57 @@ config = {
     },
 
     # enable_search to True will automatically try and find a suitable hash to save having to rehash when creating torrents
+    "SEARCH": {
+        # Search mode can scan local libraries and create UA queue files for tracker uploads.
+        # Queues and search cache are stored outside tmp so temporary upload metadata can be cleaned safely.
+        "queue_dir": "data/queues",
+        "cache_dir": "data/search_cache",
+
+        # Define reusable content libraries. Targets below can reference these names instead of repeating paths.
+        "libraries": {
+            # "bhd_movies": ["/media/bhd/movies"],
+            # "gpw_movies": ["/media/gpw/movies"],
+            # "mtv_movies": ["/media/mtv/movies"],
+            # "znth_music": ["/media/znth/music"],
+        },
+
+        "profiles": {
+            "movies": {
+                "enabled": False,
+                "targets": {
+                    # Search GPW/MTV libraries for content that may be uploaded to BHD.
+                    "BHD": {
+                        "source_libraries": ["gpw_movies", "mtv_movies"],
+                        "source_paths": [],
+                        "queue_name": "search_bhd_movies",
+                        "linking": "",
+                        "link_destination": "",
+                    },
+                    # Search BHD/MTV libraries for content that may be uploaded to GPW.
+                    "GPW": {
+                        "source_libraries": ["bhd_movies", "mtv_movies"],
+                        "source_paths": [],
+                        "queue_name": "search_gpw_movies",
+                        "linking": "",
+                        "link_destination": "",
+                    },
+                },
+            },
+            "music": {
+                "enabled": False,
+                "targets": {
+                    "ZNTH": {
+                        "source_libraries": [],
+                        "source_paths": [],
+                        "queue_name": "search_znth_music",
+                        "linking": "",
+                        "link_destination": "",
+                    },
+                },
+            },
+        },
+    },
+
     # If you find issue, especially in local/remote path mapping, use the "--debug" argument to print out some related details
     "TORRENT_CLIENTS": {
         # Name your torrent clients here, for example, this example is named "qbittorrent" and is set as default_torrent_client above
