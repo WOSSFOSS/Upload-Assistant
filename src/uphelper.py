@@ -78,6 +78,100 @@ class UploadHelper:
     def _format_source_size(size_bytes: Any) -> str:
         return UploadHelper._format_size(size_bytes) or "0.00 MiB"
 
+    @staticmethod
+    def _mi_value(value: Any) -> str:
+        if value in (None, "", {}):
+            return ""
+        return str(value).strip()
+
+    @staticmethod
+    def _format_bitrate(value: Any) -> Optional[str]:
+        value_text = UploadHelper._mi_value(value)
+        if not value_text:
+            return None
+
+        try:
+            bitrate = float(value_text)
+        except ValueError:
+            return value_text
+
+        if bitrate >= 1_000_000:
+            return f"{bitrate / 1_000_000:.2f} Mb/s"
+        if bitrate >= 1_000:
+            return f"{bitrate / 1_000:.0f} kb/s"
+        return f"{bitrate:.0f} b/s"
+
+    @staticmethod
+    def _format_channels(value: Any) -> str:
+        channels = UploadHelper._mi_value(value)
+        if not channels:
+            return ""
+        try:
+            channel_count = float(channels)
+        except ValueError:
+            return channels
+        if channel_count.is_integer():
+            return f"{int(channel_count)}ch"
+        return f"{channel_count:g}ch"
+
+    @staticmethod
+    def _get_mediainfo_tracks(meta: Meta) -> list[dict[str, Any]]:
+        mediainfo = cast(dict[str, Any], meta.get('mediainfo', {}))
+        media = cast(dict[str, Any], mediainfo.get('media', {}))
+        tracks = media.get('track', [])
+        if isinstance(tracks, list):
+            return [cast(dict[str, Any], track) for track in tracks if isinstance(track, dict)]
+        return []
+
+    @staticmethod
+    def _format_confirm_media_lines(meta: Meta) -> list[str]:
+        tracks = UploadHelper._get_mediainfo_tracks(meta)
+        if not tracks:
+            return []
+
+        lines: list[str] = []
+        video_tracks = [track for track in tracks if track.get('@type') == 'Video']
+        audio_tracks = [track for track in tracks if track.get('@type') == 'Audio']
+        subtitle_tracks = [track for track in tracks if track.get('@type') == 'Text']
+
+        if video_tracks:
+            video_bitrate = UploadHelper._format_bitrate(video_tracks[0].get('BitRate'))
+            if video_bitrate:
+                lines.append(f"[bold]Video bitrate:[/bold] {video_bitrate}")
+
+        for index, track in enumerate(audio_tracks, start=1):
+            language = UploadHelper._mi_value(track.get('Language')) or "Unknown"
+            codec = (
+                UploadHelper._mi_value(track.get('Format_Commercial_IfAny'))
+                or UploadHelper._mi_value(track.get('Format'))
+            )
+            channels = UploadHelper._format_channels(track.get('Channels'))
+            bitrate = UploadHelper._format_bitrate(track.get('BitRate'))
+            title = UploadHelper._mi_value(track.get('Title'))
+            details = [part for part in (language, codec, channels, bitrate, title) if part]
+            lines.append(f"[bold]Audio {index}:[/bold] {' / '.join(details)}")
+
+        if subtitle_tracks:
+            subtitles: list[str] = []
+            seen_subtitles: set[str] = set()
+            for track in subtitle_tracks:
+                language = UploadHelper._mi_value(track.get('Language')) or "Unknown"
+                flags = [
+                    flag
+                    for flag, key in (("Default", "Default"), ("Forced", "Forced"))
+                    if UploadHelper._mi_value(track.get(key)).lower() == "yes"
+                ]
+                subtitle = language
+                if flags:
+                    subtitle = f"{subtitle} ({', '.join(flags)})"
+                if subtitle not in seen_subtitles:
+                    seen_subtitles.add(subtitle)
+                    subtitles.append(subtitle)
+            if subtitles:
+                lines.append(f"[bold]Subtitles:[/bold] {', '.join(subtitles)}")
+
+        return lines
+
     async def dupe_check(self, dupes: list[Union[DupeEntry, str]], meta: Meta, tracker_name: str) -> tuple[bool, Meta]:
         source_size = self._format_size(meta.get('source_size'))
         if source_size is None and meta.get('is_disc') != "BDMV":
@@ -480,6 +574,8 @@ class UploadHelper:
 
             if not meta.get('emby', False):
                 console.print(f"[bold]Name:[/bold] {meta['name']}")
+                for media_line in self._format_confirm_media_lines(meta):
+                    console.print(media_line)
                 console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
                 confirm = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N[/yellow]: ").strip().lower() == 'y'
             elif not meta.get('emby_debug', False):
