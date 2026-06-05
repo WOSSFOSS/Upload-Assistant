@@ -636,6 +636,38 @@ class UploadHelper:
         if meta['debug'] is True:
             console.print("[bold red]DEBUG: True - Will not actually upload!")
             console.print(f"Prep material saved to {meta['base_dir']}/tmp/{meta['uuid']}")
+        if meta.get('category') == 'MUSIC' or meta.get('is_music'):
+            console.print()
+            console.print("[bold yellow]Music Info[/bold yellow]")
+            console.print(f"[bold]Artist:[/bold] {meta.get('artist', '')}")
+            console.print(f"[bold]Album:[/bold] {meta.get('album', '')}")
+            if meta.get('year'):
+                console.print(f"[bold]Year:[/bold] {meta.get('year')}")
+            if meta.get('genres'):
+                console.print(f"[bold]Genre:[/bold] {meta.get('genres')}")
+            console.print(f"[bold]Category:[/bold] MUSIC")
+            console.print()
+            info_parts = [str(part) for part in [
+                meta.get('service', ''),
+                meta.get('source', ''),
+                meta.get('type', ''),
+                f"{meta.get('bit_depth')}bit" if meta.get('bit_depth') and not meta.get('is_lossy') else '',
+                meta.get('sampling_rate', '') if not meta.get('is_lossy') else meta.get('bitrate', ''),
+            ] if part]
+            if info_parts:
+                console.print(' / '.join(info_parts))
+                console.print()
+            console.print(f"[bold]Name:[/bold] {meta['name']}")
+            console.print(f"[bold]Tracks:[/bold] {meta.get('track_count', 0)}")
+            if meta.get('mbid'):
+                console.print(f"[bold]MusicBrainz:[/bold] https://musicbrainz.org/release/{meta['mbid']}")
+            if meta.get('discogs_id'):
+                console.print(f"[bold]Discogs:[/bold] https://www.discogs.com/release/{meta['discogs_id']}")
+            if meta.get('deezer_info', {}).get('link'):
+                console.print(f"[bold]Deezer:[/bold] {meta['deezer_info']['link']}")
+            console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
+            confirm_input = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N/skip[/yellow]: ").strip().lower()
+            return "skip" if confirm_input in {"s", "skip"} else confirm_input == 'y'
         console.print()
         console.print("[bold yellow]Database Info[/bold yellow]")
         console.print(f"[bold]Title:[/bold] {meta['title']} ({meta['year']})")

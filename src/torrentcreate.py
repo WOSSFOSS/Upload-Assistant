@@ -217,7 +217,10 @@ class TorrentCreator:
                 include: list[str] = []
                 exclude: list[str] = []
 
-                if meta['keep_folder']:
+                if meta.get('is_music'):
+                    include = []
+                    exclude = []
+                elif meta['keep_folder']:
                     console.print('--keep-folder was specified. Using complete folder for torrent creation.')
                     # specific nfo catch for certain trackers. BASE catch should prevent unintentional inclusion by default
                     if meta.get('keep_nfo', False) and "BASE" not in output_filename:

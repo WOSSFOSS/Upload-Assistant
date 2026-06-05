@@ -34,6 +34,7 @@ try:
     from src.is_scene import SceneManager
     from src.languages import languages_manager
     from src.metadata_searching import MetadataSearchingManager
+    from src.music import MusicProcessor, is_music_path
     from src.radarr import RadarrManager
     from src.region import get_distributor, get_region, get_service
     from src.rehostimages import RehostImagesManager
@@ -165,6 +166,24 @@ class Prep:
 
         if meta['debug']:
             console.print(f"[cyan]ID: {meta['uuid']}")
+
+        if is_music_path(meta['path']):
+            console.print("[yellow]Processing as music[/yellow]")
+            music_processor = MusicProcessor(self.config, base_dir)
+            meta = await music_processor.process(meta)
+
+            if not meta.get('emby') and meta.get('trackers'):
+                trackers = meta['trackers']
+            else:
+                default_trackers = self.config['TRACKERS'].get('default_trackers', '')
+                trackers = [tracker.strip() for tracker in default_trackers.split(',')]
+            if isinstance(trackers, str):
+                trackers = [t.strip().upper() for t in trackers.split(',')] if "," in trackers else [trackers.strip().upper()]
+            else:
+                trackers = [t.strip().upper() for t in trackers]
+            meta['trackers'] = trackers
+            meta['requested_trackers'] = trackers
+            return meta
 
         try:
             meta['is_disc'], videoloc, bdinfo, meta['discs'] = await self.disc_info_manager.get_disc(meta)

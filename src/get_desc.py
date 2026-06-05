@@ -53,6 +53,11 @@ async def gen_desc(
     _takescreens_manager: TakeScreensManager,
     _uploadscreens_manager: UploadScreensManager,
 ) -> dict[str, Any]:
+    if meta.get("is_music"):
+        description_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt"
+        if os.path.exists(description_path):
+            return meta
+
     def clean_text(text: str) -> str:
         return text.replace("\r\n", "\n").strip()
 

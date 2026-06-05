@@ -119,7 +119,29 @@ class NameManager:
         # YAY NAMING FUN
         name = ""
         potential_missing: list[str] = []
-        if meta['category'] == "MOVIE":  # MOVIE SPECIFIC
+        if meta['category'] == "MUSIC":
+            artist = str(meta.get('artist', '')).strip()
+            album = str(meta.get('album', '')).strip()
+            music_type = str(meta.get('type', '')).strip()
+            bit_depth = str(meta.get('bit_depth', '')).strip()
+            sampling_rate = str(meta.get('sampling_rate', '')).strip()
+            bitrate = str(meta.get('bitrate', '')).strip()
+            music_service = str(meta.get('service', '')).strip()
+            music_source = str(meta.get('source', '')).strip()
+            music_edition = str(meta.get('edition', '')).strip()
+            is_lossy = bool(meta.get('is_lossy', False))
+
+            if is_lossy:
+                quality = bitrate
+            else:
+                quality = ' '.join(part for part in [f"{bit_depth}bit" if bit_depth else "", sampling_rate] if part)
+            year_part = f"({year})" if year else ""
+            bracket = ' '.join(part for part in [music_service, music_source, music_type, quality] if part)
+            name = ' '.join(part for part in [f"{artist} - {album}".strip(), year_part, music_edition] if part)
+            if bracket:
+                name = f"{name} [{bracket}]"
+            potential_missing = ['artist', 'album']
+        elif meta['category'] == "MOVIE":  # MOVIE SPECIFIC
             if type == "DISC":  # Disk
                 if meta['is_disc'] == 'BDMV':
                     name = f"{title} {alt_title} {year} {three_d} {edition} {hybrid} {repack} {resolution} {region} {uhd} {source} {hdr} {video_codec} {audio}"
