@@ -69,14 +69,25 @@ class UNIT3D:
         }
 
         category_id = str((await self.get_category_id(meta))['category_id'])
-        params_dict: dict[str, str] = {
-            "tmdbId": str(meta['tmdb']),
-            "categories[]": category_id,
-            "name": "",
-            "perPage": "100",
-        }
+        if meta.get("is_music"):
+            music_name = " ".join(
+                part for part in [str(meta.get("artist", "")).strip(), str(meta.get("album", "")).strip()]
+                if part
+            )
+            params_dict: dict[str, str] = {
+                "categories[]": category_id,
+                "name": music_name or str(meta.get("name", "")),
+                "perPage": "100",
+            }
+        else:
+            params_dict = {
+                "tmdbId": str(meta['tmdb']),
+                "categories[]": category_id,
+                "name": "",
+                "perPage": "100",
+            }
         params_list: Optional[ParamsList] = None
-        if self.tracker not in ["OTW"]:
+        if self.tracker not in ["OTW"] and not meta.get("is_music"):
             resolutions = await self.get_resolution_id(meta)
             resolution_id = str(resolutions["resolution_id"])
             if resolution_id in ["3", "4"]:
@@ -108,15 +119,17 @@ class UNIT3D:
         request_params: ParamsList
         request_params = params_list if params_list is not None else list(params_dict.items())
 
-        other_params_dict: dict[str, str] = {
-            "tmdbId": str(meta['tmdb']),
-            "categories[]": category_id,
-            "name": "",
-            "perPage": "100",
-        }
-        if meta["category"] == "TV":
-            other_params_dict["name"] = other_params_dict["name"] + f" {meta.get('season', '')}"
-        other_request_params: ParamsList = list(other_params_dict.items())
+        other_request_params: ParamsList = request_params
+        if not meta.get("is_music"):
+            other_params_dict: dict[str, str] = {
+                "tmdbId": str(meta['tmdb']),
+                "categories[]": category_id,
+                "name": "",
+                "perPage": "100",
+            }
+            if meta["category"] == "TV":
+                other_params_dict["name"] = other_params_dict["name"] + f" {meta.get('season', '')}"
+            other_request_params = list(other_params_dict.items())
 
         urls_to_check = [self.search_url]
         if getattr(self, "pending_url", None):

@@ -168,6 +168,9 @@ class DupeChecker:
 
         meta[f'{tracker_name}_search_results'] = processed_dupes
 
+        if meta.get('is_music'):
+            return processed_dupes
+
         def coerce_int(value: Any) -> Optional[int]:
             try:
                 return int(value) if value is not None else None

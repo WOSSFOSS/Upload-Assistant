@@ -125,6 +125,8 @@ async def disc_screenshots(
         num_screens: int = 0,
         force_screenshots: bool = False
 ) -> None:
+    if meta.get('is_music'):
+        return
     img_host = await get_image_host(meta)
     screens = meta['screens']
     start_time = time.time() if meta.get('debug') else 0.0
@@ -486,6 +488,8 @@ async def dvd_screenshots(
         num_screens: int = 0,
         retry_cap: bool = False
 ) -> None:
+    if meta.get('is_music'):
+        return
     screens = meta['screens']
     if 'image_list' not in meta:
         meta['image_list'] = []
@@ -866,6 +870,8 @@ async def screenshots(
         force_screenshots: bool = False,
         manual_frames: Union[str, list[str]] = "",
 ) -> Union[list[str], None]:
+    if meta.get('is_music'):
+        return None
     img_host = await get_image_host(meta)
     screens = meta['screens']
     start_time = time.time() if meta.get('debug') else 0.0
