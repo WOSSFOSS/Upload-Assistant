@@ -1321,16 +1321,23 @@ async def ensure_base_torrent_for_upload(meta: Meta, config: dict[str, Any], cli
             base_piece_mb = int(torrent.piece_size // (1024 * 1024))
             meta['base_torrent_piece_mb'] = base_piece_mb
             file_search_match = meta.pop('torrent_file_search_match', None)
-            if isinstance(file_search_match, dict):
-                torrent_hash = str(file_search_match.get('hash') or getattr(torrent, 'infohash', '') or getattr(torrent, 'infohash_v1', ''))
-                piece_size = file_search_match.get('piece_size') or torrent.piece_size
-                pieces = file_search_match.get('pieces') or torrent.pieces
+            if not meta.get('base_torrent_info_printed'):
+                torrent_hash = str(getattr(torrent, 'infohash', '') or getattr(torrent, 'infohash_v1', ''))
+                piece_size: Any = torrent.piece_size
+                pieces: Any = torrent.pieces
+                prefix = "[green]Prepared BASE.torrent[/green]"
+                if isinstance(file_search_match, dict):
+                    torrent_hash = str(file_search_match.get('hash') or torrent_hash)
+                    piece_size = file_search_match.get('piece_size') or piece_size
+                    pieces = file_search_match.get('pieces') or pieces
+                    prefix = "[green]Found matching .torrent via file search[/green]"
                 console.print(
-                    f"[green]Found matching .torrent via file search[/green] - "
+                    f"{prefix} - "
                     f"[yellow]Piece size: {_format_piece_size(piece_size)}[/yellow] - "
                     f"[yellow]Pieces: {pieces}[/yellow] - "
                     f"[yellow]Hash: {torrent_hash}[/yellow]"
                 )
+                meta['base_torrent_info_printed'] = True
         except Exception as e:
             if meta.get('debug', False):
                 console.print(f"[yellow]Unable to cache BASE.torrent piece size: {e}")

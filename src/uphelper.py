@@ -148,7 +148,12 @@ class UploadHelper:
         return None
 
     @staticmethod
-    def _format_duration(value: Any) -> Optional[str]:
+    def _format_duration(value: Any, *, value_is_minutes: bool = False) -> Optional[str]:
+        if value_is_minutes:
+            try:
+                value = float(UploadHelper._mi_value(value) or 0) * 60
+            except ValueError:
+                return None
         seconds_total = UploadHelper._duration_to_seconds(value)
         if seconds_total is None:
             return None
@@ -224,13 +229,14 @@ class UploadHelper:
         audio_tracks = [track for track in tracks if track.get('@type') == 'Audio']
         subtitle_tracks = [track for track in tracks if track.get('@type') == 'Text']
 
-        duration = UploadHelper._format_duration(meta.get('video_duration'))
-        if duration is None:
-            general_tracks = [track for track in tracks if track.get('@type') == 'General']
-            if general_tracks:
-                duration = UploadHelper._format_duration(general_tracks[0].get('Duration'))
+        duration = None
+        general_tracks = [track for track in tracks if track.get('@type') == 'General']
+        if general_tracks:
+            duration = UploadHelper._format_duration(general_tracks[0].get('Duration'))
         if duration is None and video_tracks:
             duration = UploadHelper._format_duration(video_tracks[0].get('Duration'))
+        if duration is None:
+            duration = UploadHelper._format_duration(meta.get('video_duration'), value_is_minutes=True)
         if duration:
             lines.append(f"[bold]Duration:[/bold] {duration}")
 
