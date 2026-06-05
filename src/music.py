@@ -21,6 +21,11 @@ MUSIC_EXTENSIONS = {
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 LOG_EXTENSIONS = {".cue", ".log", ".m3u", ".m3u8", ".nfo", ".txt"}
 LOSSLESS_TYPES = {"ALAC", "DFF", "DSD", "DSF", "FLAC", "PCM", "WAV", "WMA LOSSLESS"}
+MUSIC_LINK_ICONS = {
+    "MusicBrainz": "https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg",
+    "Discogs": "https://www.discogs.com/favicon.ico",
+    "Deezer": "https://www.google.com/s2/favicons?domain=deezer.com&sz=32",
+}
 
 
 def is_music_path(path: str) -> bool:
@@ -65,8 +70,22 @@ def _clean_tag_value(value: str) -> str:
 
 
 def _duration_string(value: Any) -> str:
+    seconds = _duration_seconds(value)
+    if seconds is None:
+        return ""
+    minutes, seconds = divmod(seconds, 60)
+    return f"{minutes}:{seconds:02d}"
+
+
+def _duration_seconds(value: Any) -> Optional[int]:
     if isinstance(value, str):
         text = value.strip()
+        colon_match = re.match(r"^(?:(\d+):)?(\d+):(\d{2})$", text)
+        if colon_match:
+            hours = int(colon_match.group(1) or 0)
+            minutes = int(colon_match.group(2))
+            seconds = int(colon_match.group(3))
+            return (hours * 3600) + (minutes * 60) + seconds
         text_match = re.match(
             r"(?:(\d+)\s*h(?:ours?)?)?\s*(?:(\d+)\s*min(?:utes?)?)?\s*(?:(\d+)\s*s(?:ec(?:onds?)?)?)?",
             text,
@@ -76,16 +95,12 @@ def _duration_string(value: Any) -> str:
             hours = int(text_match.group(1) or 0)
             minutes = int(text_match.group(2) or 0)
             seconds = int(text_match.group(3) or 0)
-            total_seconds = (hours * 3600) + (minutes * 60) + seconds
-            minutes, seconds = divmod(total_seconds, 60)
-            return f"{minutes}:{seconds:02d}"
+            return (hours * 3600) + (minutes * 60) + seconds
     try:
         duration = float(value)
     except (TypeError, ValueError):
-        return ""
-    seconds = int(round(duration / 1000 if duration >= 10000 else duration))
-    minutes, seconds = divmod(seconds, 60)
-    return f"{minutes}:{seconds:02d}"
+        return None
+    return int(round(duration / 1000 if duration >= 10000 else duration))
 
 
 def _strip_discogs_suffix(value: str) -> str:
@@ -356,7 +371,11 @@ class MusicProcessor:
             meta["artist"] = meta.get("artist") or mb_info.get("artist", "")
             meta["album"] = meta.get("album") or mb_info.get("title", "")
             meta["year"] = meta.get("year") or mb_info.get("date", "")[:4]
+            meta["release_date"] = meta.get("release_date") or mb_info.get("date", "")
             meta["genres"] = ", ".join(mb_info.get("genres", []))
+            meta["label"] = meta.get("label") or mb_info.get("label", "")
+            meta["catalog_number"] = meta.get("catalog_number") or mb_info.get("catalog_number", "")
+            meta["barcode"] = meta.get("barcode") or mb_info.get("barcode", "")
             if mb_info.get("cover"):
                 meta["album_cover"] = mb_info["cover"]
             if mb_info.get("back_cover"):
@@ -366,6 +385,10 @@ class MusicProcessor:
         if discogs_info:
             meta["discogs_info"] = discogs_info
             meta["discogs_id"] = discogs_info.get("id", "")
+            meta["release_date"] = meta.get("release_date") or discogs_info.get("released", "")
+            meta["label"] = meta.get("label") or discogs_info.get("label", "")
+            meta["catalog_number"] = meta.get("catalog_number") or discogs_info.get("catalog_number", "")
+            meta["barcode"] = meta.get("barcode") or discogs_info.get("barcode", "")
             if not meta.get("genres") and discogs_info.get("genres"):
                 meta["genres"] = ", ".join(discogs_info["genres"])
             if not meta.get("album_cover") and discogs_info.get("cover"):
@@ -430,6 +453,19 @@ class MusicProcessor:
             if isinstance(resource, str) and "discogs.com" in resource:
                 discogs_url = resource
                 break
+        label_info = release.get("label-info") or []
+        labels: list[str] = []
+        catalog_numbers: list[str] = []
+        for label_entry in label_info:
+            if not isinstance(label_entry, dict):
+                continue
+            label = label_entry.get("label", {})
+            label_name = _mi_value(label.get("name") if isinstance(label, dict) else "")
+            catalog_number = _mi_value(label_entry.get("catalog-number"))
+            if label_name and label_name not in labels:
+                labels.append(label_name)
+            if catalog_number and catalog_number not in catalog_numbers:
+                catalog_numbers.append(catalog_number)
         cover = await self._coverart_archive(mbid)
         return {
             "id": mbid,
@@ -437,6 +473,8 @@ class MusicProcessor:
             "title": release.get("title", ""),
             "date": release.get("date", ""),
             "genres": [g.get("name", "") for g in release.get("genres", []) if isinstance(g, dict) and g.get("name")],
+            "label": ", ".join(labels),
+            "catalog_number": ", ".join(catalog_numbers),
             "barcode": release.get("barcode", ""),
             "discogs_url": discogs_url,
             **cover,
@@ -482,6 +520,18 @@ class MusicProcessor:
         if not release:
             return None
         artists = release.get("artists", [])
+        labels = release.get("labels", [])
+        label_names: list[str] = []
+        catalog_numbers: list[str] = []
+        for label in labels:
+            if not isinstance(label, dict):
+                continue
+            label_name = _strip_discogs_suffix(_mi_value(label.get("name")))
+            catalog_number = _mi_value(label.get("catno"))
+            if label_name and label_name not in label_names:
+                label_names.append(label_name)
+            if catalog_number and catalog_number not in catalog_numbers:
+                catalog_numbers.append(catalog_number)
         images = release.get("images", [])
         cover = ""
         for image in images:
@@ -493,6 +543,10 @@ class MusicProcessor:
             "artist": _strip_discogs_suffix(_mi_value(artists[0].get("name") if artists else "")),
             "title": release.get("title", ""),
             "year": str(release.get("year", "")),
+            "released": release.get("released", ""),
+            "label": ", ".join(label_names),
+            "catalog_number": ", ".join(catalog_numbers),
+            "barcode": release.get("barcode", ""),
             "genres": release.get("genres", []) or [],
             "styles": release.get("styles", []) or [],
             "cover": cover,
@@ -541,15 +595,26 @@ class MusicProcessor:
         if isinstance(cover, str) and cover.startswith(("http://", "https://")):
             lines.extend([f"[center][img]{cover}[/img][/center]", ""])
 
+        info_block = self._music_info_block(meta)
+        if info_block:
+            lines.extend(["[code][b]Release Info[/b]", *info_block, "[/code]", ""])
+
         tracklist = meta.get("tracklist") or {}
         if tracklist:
             lines.extend(["[code][b]Tracklist[/b]"])
+            total_seconds = 0
             for disc, tracks in tracklist.items():
                 if len(tracklist) > 1:
                     lines.append("")
                     lines.append(disc)
                 for title, duration in tracks.items():
                     lines.append(f"{title} [{duration}]" if duration else title)
+                    duration_seconds = _duration_seconds(duration)
+                    if duration_seconds is not None:
+                        total_seconds += duration_seconds
+            if total_seconds:
+                lines.append("")
+                lines.append(f"Total runtime: {_duration_string(total_seconds)}")
             lines.extend(["[/code]", ""])
 
         log_files = meta.get("log_files") or []
@@ -569,6 +634,18 @@ class MusicProcessor:
         async with aiofiles.open(description_path, "w", encoding="utf-8", newline="") as desc_file:
             await desc_file.write("\n".join(lines).strip() + "\n")
 
+    def _music_info_block(self, meta: dict[str, Any]) -> list[str]:
+        info = [
+            ("Artist", meta.get("artist")),
+            ("Album", meta.get("album")),
+            ("Year", meta.get("year")),
+            ("Release date", meta.get("release_date")),
+            ("Label", meta.get("label")),
+            ("Catalog number", meta.get("catalog_number")),
+            ("Barcode", meta.get("barcode")),
+        ]
+        return [f"{label}: {value}" for label, value in info if _mi_value(value)]
+
     async def _read_text_file(self, path: str) -> str:
         for encoding in ("utf-8", "latin1"):
             try:
@@ -583,11 +660,16 @@ class MusicProcessor:
     def _music_links(self, meta: dict[str, Any]) -> list[str]:
         links: list[str] = []
         if meta.get("mbid"):
-            links.append(f"MusicBrainz: https://musicbrainz.org/release/{meta['mbid']}")
+            links.append(self._music_link_line("MusicBrainz", f"https://musicbrainz.org/release/{meta['mbid']}"))
         if meta.get("discogs_id"):
-            links.append(f"Discogs: https://www.discogs.com/release/{meta['discogs_id']}")
+            links.append(self._music_link_line("Discogs", f"https://www.discogs.com/release/{meta['discogs_id']}"))
         elif meta.get("discogs_info", {}).get("url"):
-            links.append(f"Discogs: {meta['discogs_info']['url']}")
+            links.append(self._music_link_line("Discogs", meta["discogs_info"]["url"]))
         if meta.get("deezer_info", {}).get("link"):
-            links.append(f"Deezer: {meta['deezer_info']['link']}")
+            links.append(self._music_link_line("Deezer", meta["deezer_info"]["link"]))
         return links
+
+    def _music_link_line(self, service: str, url: str) -> str:
+        icon = MUSIC_LINK_ICONS.get(service)
+        prefix = f"[img=20]{icon}[/img] " if icon else ""
+        return f"{prefix}{service}: {url}"
