@@ -65,10 +65,25 @@ def _clean_tag_value(value: str) -> str:
 
 
 def _duration_string(value: Any) -> str:
+    if isinstance(value, str):
+        text = value.strip()
+        text_match = re.match(
+            r"(?:(\d+)\s*h(?:ours?)?)?\s*(?:(\d+)\s*min(?:utes?)?)?\s*(?:(\d+)\s*s(?:ec(?:onds?)?)?)?",
+            text,
+            re.IGNORECASE,
+        )
+        if text_match and any(text_match.groups()):
+            hours = int(text_match.group(1) or 0)
+            minutes = int(text_match.group(2) or 0)
+            seconds = int(text_match.group(3) or 0)
+            total_seconds = (hours * 3600) + (minutes * 60) + seconds
+            minutes, seconds = divmod(total_seconds, 60)
+            return f"{minutes}:{seconds:02d}"
     try:
-        seconds = int(round(float(value) / 1000))
+        duration = float(value)
     except (TypeError, ValueError):
         return ""
+    seconds = int(round(duration / 1000 if duration >= 10000 else duration))
     minutes, seconds = divmod(seconds, 60)
     return f"{minutes}:{seconds:02d}"
 
