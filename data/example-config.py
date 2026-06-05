@@ -438,6 +438,8 @@ config = {
             "api_key": "",
             "bhd_rss_key": "",
             "announce_url": "https://beyond-hd.me/announce/customannounceurl",
+            # Send uploads to BHD queue for staff approval
+            "modq": False,
             # Send uploads to BHD drafts
             "draft_default": False,
             "anon": False,

@@ -211,13 +211,16 @@ class BHD:
             'description': desc,
             'anon': anon,
             'sd': meta.get('sd', 0),
-            'live': draft
+            'live': draft,
             # 'internal' : 0,
             # 'featured' : 0,
             # 'free' : 0,
             # 'double_up' : 0,
             # 'sticky' : 0,
         }
+        if self._is_true(self.tracker_config.get('modq', False)) or meta.get('modq', False):
+            data['delay'] = 1
+
         # Internal
         if (
             self.config['TRACKERS'][self.tracker].get('internal', False) is True
