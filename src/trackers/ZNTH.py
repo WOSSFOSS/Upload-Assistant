@@ -1,5 +1,5 @@
-# Upload Assistant (local custom tracker)
 import os
+import re
 from pathlib import Path
 from typing import Any
 
@@ -26,10 +26,86 @@ class ZNTH(UNIT3D):
         self.banned_groups: list[str] = []
 
     async def get_name(self, meta: dict[str, Any]) -> dict[str, str]:
+        if meta.get('is_book'):
+            return {'name': self._get_book_name(meta)}
+
         znth_name = meta['name']
         if meta['category'] == 'TV' and meta.get('episode_title', "") != "":
             znth_name = znth_name.replace(f"{meta['episode_title']} {meta['resolution']}", f"{meta['resolution']}", 1)
         return {'name': znth_name}
+
+    def _get_book_name(self, meta: dict[str, Any]) -> str:
+        author = self._clean_name_part(meta.get('author')) or 'Unknown Author'
+        title = self._clean_name_part(meta.get('title')) or self._clean_name_part(meta.get('name')) or 'Unknown Title'
+        year = self._clean_year(meta.get('year'))
+        book_format = self._clean_format(meta.get('type'))
+        isbn = self._clean_isbn(meta.get('isbn'))
+        tag = self._clean_tag(meta.get('tag'))
+
+        if meta.get('is_audiobook'):
+            parts = [f"{author} - {title}", year, book_format]
+            bitrate = self._book_bitrate(meta)
+            if bitrate and book_format.upper() in {'MP3', 'AAC', 'OPUS', 'OGG', 'VORBIS', 'M4A'}:
+                parts.append(bitrate)
+            if isbn:
+                parts.append(isbn)
+            if meta.get('retail'):
+                parts.append('Retail')
+            name = ' '.join(part for part in parts if part)
+            return self._append_group_tag(name, tag)
+
+        parts = [f"{author} - {title}", year]
+        edition = self._clean_name_part(meta.get('edition'))
+        if edition:
+            parts.append(edition)
+        parts.append(book_format)
+        if isbn:
+            parts.append(isbn)
+        if meta.get('retail'):
+            parts.append('Retail')
+        if meta.get('scan'):
+            parts.append('Scan')
+        if meta.get('ocr'):
+            parts.append('OCR')
+        return ' '.join(part for part in parts if part)
+
+    def _book_bitrate(self, meta: dict[str, Any]) -> str:
+        bitrate = meta.get('audiobook_bitrate') or meta.get('bitrate')
+        if bitrate in (None, ''):
+            return ''
+        text = str(bitrate)
+        match = re.search(r'\d+(?:\.\d+)?', text)
+        if not match:
+            return ''
+        value = float(match.group(0))
+        if value > 1000:
+            value = value / 1000
+        return str(int(round(value)))
+
+    def _append_group_tag(self, name: str, tag: str) -> str:
+        if not tag:
+            return name
+        return f"{name}-{tag}"
+
+    def _clean_name_part(self, value: Any) -> str:
+        text = str(value or '').strip()
+        text = re.sub(r'\s+', ' ', text)
+        return text
+
+    def _clean_year(self, value: Any) -> str:
+        match = re.search(r'\b(18|19|20)\d{2}\b', str(value or ''))
+        return match.group(0) if match else ''
+
+    def _clean_format(self, value: Any) -> str:
+        text = str(value or '').strip().upper().replace('VORBIS', 'OGG')
+        return text or 'UNKNOWN'
+
+    def _clean_isbn(self, value: Any) -> str:
+        return re.sub(r'[-\s]', '', str(value or '')).upper()
+
+    def _clean_tag(self, value: Any) -> str:
+        tag = str(value or '').strip()
+        return tag[1:] if tag.startswith('-') else tag
 
     async def get_category_id(
         self, meta: dict[str, Any], category: str = "", reverse: bool = False, mapping_only: bool = False

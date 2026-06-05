@@ -644,12 +644,30 @@ class UploadHelper:
                 console.print(f"[bold]Narrator:[/bold] {meta.get('narrator')}")
             if meta.get('year'):
                 console.print(f"[bold]Year:[/bold] {meta.get('year')}")
+            if meta.get('edition'):
+                console.print(f"[bold]Edition:[/bold] {meta.get('edition')}")
             if meta.get('book_language'):
                 console.print(f"[bold]Language:[/bold] {meta.get('book_language')}")
             if meta.get('publisher'):
                 console.print(f"[bold]Publisher:[/bold] {meta.get('publisher')}")
             if meta.get('isbn'):
                 console.print(f"[bold]ISBN:[/bold] {meta.get('isbn')}")
+            if meta.get('book_series'):
+                series_info = str(meta.get('book_series'))
+                if meta.get('book_number'):
+                    series_info = f"{series_info} #{meta.get('book_number')}"
+                console.print(f"[bold]Series:[/bold] {series_info}")
+            release_flags = [
+                flag for flag, enabled in (
+                    ('Retail', meta.get('retail')),
+                    ('Scan', meta.get('scan')),
+                    ('OCR', meta.get('ocr')),
+                    ('Abridged', meta.get('abridged')),
+                    ('Unabridged', meta.get('unabridged')),
+                ) if enabled
+            ]
+            if release_flags:
+                console.print(f"[bold]Release:[/bold] {', '.join(release_flags)}")
             console.print(f"[bold]Category:[/bold] {'AUDIOBOOK' if meta.get('is_audiobook') else 'BOOK'}")
             console.print()
             info_parts = [str(part) for part in [

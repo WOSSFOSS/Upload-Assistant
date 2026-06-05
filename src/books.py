@@ -74,8 +74,15 @@ def _mi_value(*values: Any) -> str:
 def _clean_text(value: str) -> str:
     value = html.unescape(value or "")
     if any(0x80 <= ord(char) <= 0x9F for char in value):
-        with contextlib.suppress(Exception):
-            value = value.encode("latin-1", errors="ignore").decode("cp1252", errors="ignore")
+        fixed_chars: list[str] = []
+        for char in value:
+            codepoint = ord(char)
+            if 0x80 <= codepoint <= 0x9F:
+                with contextlib.suppress(Exception):
+                    fixed_chars.append(bytes([codepoint]).decode("cp1252"))
+                    continue
+            fixed_chars.append(char)
+        value = "".join(fixed_chars)
     value = re.sub(r"<[^>]+>", "", value)
     return re.sub(r"\s+", " ", value).strip()
 
@@ -191,6 +198,9 @@ class BookProcessor:
             "year": year,
             "book_language": language,
             "book_language_iso": language_iso,
+            "edition": _mi_value(meta.get("edition"), meta.get("manual_edition")),
+            "book_series": _mi_value(meta.get("book_series")),
+            "book_number": _mi_value(meta.get("book_number")),
             "overview": _mi_value(meta.get("overview")),
             "genres": _mi_value(meta.get("genres"), meta.get("keywords")),
             "tmdb_id": 0,
@@ -217,6 +227,11 @@ class BookProcessor:
             "audiobook_duration": duration_seconds,
             "audiobook_duration_formatted": duration_display,
             "audiobook_bitrate": bitrate,
+            "retail": bool(meta.get("retail", False)),
+            "scan": bool(meta.get("scan", False)),
+            "ocr": bool(meta.get("ocr", False)),
+            "abridged": bool(meta.get("abridged", False)),
+            "unabridged": bool(meta.get("unabridged", False)),
             "screens": 0,
             "image_list": [],
             "skip_imghost_upload": True,
@@ -646,15 +661,33 @@ class BookProcessor:
             ("Author", meta.get("author")),
             ("Narrator", meta.get("narrator")),
             ("Year", meta.get("year")),
+            ("Edition", meta.get("edition")),
             ("Language", meta.get("book_language")),
             ("Publisher", meta.get("publisher")),
             ("ISBN", meta.get("isbn")),
+            ("Series", meta.get("book_series")),
+            ("Book Number", meta.get("book_number")),
             ("Format", "Audiobook" if meta.get("is_audiobook") else "eBook"),
+            ("Release", self._book_release_flags(meta)),
             ("Files", meta.get("book_file_count")),
             ("Duration", meta.get("audiobook_duration_formatted")),
             ("Bitrate", f"{meta.get('audiobook_bitrate')} kb/s" if meta.get("audiobook_bitrate") else ""),
         ]
         return [f"{label}: {value}" for label, value in info if _mi_value(value)]
+
+    def _book_release_flags(self, meta: dict[str, Any]) -> str:
+        flags: list[str] = []
+        if meta.get("retail"):
+            flags.append("Retail")
+        if meta.get("scan"):
+            flags.append("Scan")
+        if meta.get("ocr"):
+            flags.append("OCR")
+        if meta.get("abridged"):
+            flags.append("Abridged")
+        if meta.get("unabridged"):
+            flags.append("Unabridged")
+        return ", ".join(flags)
 
     def _book_links(self, meta: dict[str, Any]) -> list[str]:
         links: list[str] = []
