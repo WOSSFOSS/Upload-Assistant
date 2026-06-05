@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 from datetime import datetime, timezone
 from typing import Any
 

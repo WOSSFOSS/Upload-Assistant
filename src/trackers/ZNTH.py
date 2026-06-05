@@ -47,9 +47,13 @@ class ZNTH(UNIT3D):
         elif reverse:
             return {v: k for k, v in category_id.items()}
         elif category:
+            if category == 'BOOK':
+                category = 'AUDIOBOOKS' if meta.get('is_audiobook') else 'BOOKS'
             return {'category_id': category_id.get(category, '9')}
         else:
             meta_category = meta.get('category', '')
+            if meta_category == 'BOOK':
+                meta_category = 'AUDIOBOOKS' if meta.get('is_audiobook') else 'BOOKS'
             return {'category_id': category_id.get(meta_category, '9')}
 
     async def get_type_id(
@@ -83,10 +87,16 @@ class ZNTH(UNIT3D):
         }
 
     async def get_tracker_specific_files(self, meta: dict[str, Any]) -> dict[str, tuple[str, bytes, str]]:
-        if not meta.get('is_music'):
+        if not meta.get('is_music') and not meta.get('is_book'):
             return {}
 
-        cover = meta.get('user_cover') or meta.get('album_cover')
+        cover = (
+            meta.get('user_cover')
+            or meta.get('album_cover')
+            or meta.get('book_cover')
+            or meta.get('cover_file')
+            or meta.get('poster')
+        )
         if not cover or not isinstance(cover, str):
             return {}
 

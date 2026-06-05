@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import re
 from typing import Any
 
@@ -36,7 +35,9 @@ class CBR(UNIT3D):
         category_id: dict[str, str] = {
             "MOVIE": "1",
             "TV": "2",
-            "ANIMES": "4"
+            "ANIMES": "4",
+            "BOOK": "11",
+            "COMIC_MANGA": "10",
         }
 
         if mapping_only:
@@ -47,6 +48,8 @@ class CBR(UNIT3D):
         resolved_category = category if category else meta.get("category", "")
         if meta.get("anime", False) is True and resolved_category == "TV":
             resolved_category = "ANIMES"
+        if resolved_category == "BOOK" and meta.get("type", "").upper() in ("CBR", "CBZ"):
+            resolved_category = "COMIC_MANGA"
 
         if resolved_category:
             return {"category_id": category_id.get(resolved_category, "0")}
@@ -63,7 +66,19 @@ class CBR(UNIT3D):
             'DVDRIP': '3',
             'WEBDL': '4',
             'WEBRIP': '5',
-            'HDTV': '6'
+            'HDTV': '6',
+            'AZW3': '13',
+            'CBR': '14',
+            'CBZ': '15',
+            'MOBI': '16',
+            'PDF': '17',
+            'EPUB': '18',
+            'KFX': '19',
+            'MP3': '24',
+            'M4B': '24',
+            'FLAC': '24',
+            'M4A': '24',
+            'AUDIOBOOK': '24',
         }
 
         if mapping_only:
@@ -188,6 +203,8 @@ class CBR(UNIT3D):
         return data
 
     async def get_additional_checks(self, meta: dict[str, Any]) -> bool:
+        if meta.get("is_book"):
+            return True
         return await self.common.check_language_requirements(
             meta, self.tracker, languages_to_check=["portuguese", "português"], check_audio=True, check_subtitle=True
         )

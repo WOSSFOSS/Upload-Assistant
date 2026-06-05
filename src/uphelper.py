@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import json
 import os
 import re
@@ -636,6 +635,43 @@ class UploadHelper:
         if meta['debug'] is True:
             console.print("[bold red]DEBUG: True - Will not actually upload!")
             console.print(f"Prep material saved to {meta['base_dir']}/tmp/{meta['uuid']}")
+        if meta.get('category') == 'BOOK' or meta.get('is_book'):
+            console.print()
+            console.print("[bold yellow]Book Info[/bold yellow]")
+            console.print(f"[bold]Title:[/bold] {meta.get('title', '')}")
+            console.print(f"[bold]Author:[/bold] {meta.get('author', '')}")
+            if meta.get('narrator'):
+                console.print(f"[bold]Narrator:[/bold] {meta.get('narrator')}")
+            if meta.get('year'):
+                console.print(f"[bold]Year:[/bold] {meta.get('year')}")
+            if meta.get('book_language'):
+                console.print(f"[bold]Language:[/bold] {meta.get('book_language')}")
+            if meta.get('publisher'):
+                console.print(f"[bold]Publisher:[/bold] {meta.get('publisher')}")
+            if meta.get('isbn'):
+                console.print(f"[bold]ISBN:[/bold] {meta.get('isbn')}")
+            console.print(f"[bold]Category:[/bold] {'AUDIOBOOK' if meta.get('is_audiobook') else 'BOOK'}")
+            console.print()
+            info_parts = [str(part) for part in [
+                meta.get('source', ''),
+                meta.get('type', ''),
+                meta.get('audiobook_duration_formatted', ''),
+                f"{meta.get('audiobook_bitrate')} kb/s" if meta.get('audiobook_bitrate') else '',
+            ] if part]
+            if info_parts:
+                console.print(' / '.join(info_parts))
+                console.print()
+            console.print(f"[bold]Name:[/bold] {meta['name']}")
+            console.print(f"[bold]Files:[/bold] {meta.get('book_file_count', 0)}")
+            if meta.get('google_books_link'):
+                console.print(f"[bold]Google Books:[/bold] {meta['google_books_link']}")
+            if meta.get('open_library_link'):
+                console.print(f"[bold]Open Library:[/bold] {meta['open_library_link']}")
+            if meta.get('mam_link'):
+                console.print(f"[bold]MyAnonamouse:[/bold] {meta['mam_link']}")
+            console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
+            confirm_input = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N/skip[/yellow]: ").strip().lower()
+            return "skip" if confirm_input in {"s", "skip"} else confirm_input == 'y'
         if meta.get('category') == 'MUSIC' or meta.get('is_music'):
             console.print()
             console.print("[bold yellow]Music Info[/bold yellow]")

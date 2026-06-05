@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
 import gc
 import glob
@@ -125,7 +124,7 @@ async def disc_screenshots(
         num_screens: int = 0,
         force_screenshots: bool = False
 ) -> None:
-    if meta.get('is_music'):
+    if meta.get('is_music') or meta.get('is_book'):
         return
     img_host = await get_image_host(meta)
     screens = meta['screens']
@@ -488,7 +487,7 @@ async def dvd_screenshots(
         num_screens: int = 0,
         retry_cap: bool = False
 ) -> None:
-    if meta.get('is_music'):
+    if meta.get('is_music') or meta.get('is_book'):
         return
     screens = meta['screens']
     if 'image_list' not in meta:
@@ -870,7 +869,7 @@ async def screenshots(
         force_screenshots: bool = False,
         manual_frames: Union[str, list[str]] = "",
 ) -> Union[list[str], None]:
-    if meta.get('is_music'):
+    if meta.get('is_music') or meta.get('is_book'):
         return None
     img_host = await get_image_host(meta)
     screens = meta['screens']

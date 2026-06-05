@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import os
 import re
 from collections.abc import MutableMapping, Sequence
@@ -168,7 +167,7 @@ class DupeChecker:
 
         meta[f'{tracker_name}_search_results'] = processed_dupes
 
-        if meta.get('is_music'):
+        if meta.get('is_music') or meta.get('is_book'):
             return processed_dupes
 
         def coerce_int(value: Any) -> Optional[int]:

@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 config = {
     "DEFAULT": {
 
@@ -12,6 +11,10 @@ config = {
         # tmdb api key **REQUIRED**
         # visit "https://www.themoviedb.org/settings/api" copy api key and insert below
         "tmdb_api": "",
+
+        # Optional Google Books API key for book/audiobook metadata lookup.
+        # ISBN lookups also work without a key, but a key can help with quota limits.
+        "google_books_api_key": "",
 
         # Play the bell sound effect when asking for confirmation
         "sfx_on_prompt": True,

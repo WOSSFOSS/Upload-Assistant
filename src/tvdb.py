@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 # Restricted-use credential — permitted only under UAPL v1.0 and associated service provider terms
 import asyncio
 import base64

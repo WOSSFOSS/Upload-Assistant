@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import argparse
 import datetime
 import os
@@ -92,8 +91,8 @@ class Args:
         parser.add_argument('-comps', '--comparison', nargs='+', required=False, help="Use comparison images from a folder (input folder path). See: https://github.com/fr1day13/Upload-Assistant", default=None)
         parser.add_argument('-comps_index', '--comparison_index', nargs=1, required=False, help="Which of your comparison indexes is the main images (required when comps)", type=int, default=None)
         parser.add_argument('-mf', '--manual_frames', nargs=1, required=False, help="Comma-separated frame numbers to use as screenshots", type=str, default=None)
-        parser.add_argument('-c', '--category', nargs=1, required=False, help="Category [movie, tv, fanres, music]", choices=['movie', 'tv', 'fanres', 'music'], dest="manual_category")
-        parser.add_argument('-t', '--type', nargs=1, required=False, help="Type [DISC, REMUX, ENCODE, WEBDL, WEBRIP, HDTV, DVDRIP, FLAC, MP3, AAC, ALAC, WAV]", choices=['disc', 'remux', 'encode', 'webdl', 'web-dl', 'webrip', 'hdtv', 'dvdrip', 'flac', 'mp3', 'aac', 'alac', 'wav'], dest="manual_type")
+        parser.add_argument('-c', '--category', nargs=1, required=False, help="Category [movie, tv, fanres, music, book]", choices=['movie', 'tv', 'fanres', 'music', 'book'], dest="manual_category")
+        parser.add_argument('-t', '--type', nargs=1, required=False, help="Type [DISC, REMUX, ENCODE, WEBDL, WEBRIP, HDTV, DVDRIP, FLAC, MP3, AAC, ALAC, WAV, EPUB, PDF, MOBI, CBZ, CBR, M4B]", choices=['disc', 'remux', 'encode', 'webdl', 'web-dl', 'webrip', 'hdtv', 'dvdrip', 'flac', 'mp3', 'aac', 'alac', 'wav', 'epub', 'pdf', 'mobi', 'cbz', 'cbr', 'm4b'], dest="manual_type")
         parser.add_argument('--source', nargs=1, required=False, help="Source [Blu-ray, BluRay, DVD, DVD5, DVD9, HDDVD, WEB, HDTV, UHDTV, LaserDisc, DCP, CD, VINYL]", choices=['Blu-ray', 'BluRay', 'DVD', 'DVD5', 'DVD9', 'HDDVD', 'WEB', 'HDTV', 'UHDTV', 'LaserDisc', 'DCP', 'CD', 'VINYL'], dest="manual_source")
         parser.add_argument('-res', '--resolution', nargs=1, required=False, help="Resolution [2160p, 1080p, 1080i, 720p, 576p, 576i, 480p, 480i, 8640p, 4320p, OTHER]", choices=['2160p', '1080p', '1080i', '720p', '576p', '576i', '480p', '480i', '8640p', '4320p', 'other'])
         parser.add_argument('-tmdb', '--tmdb', nargs=1, required=False, help="TMDb ID (use movie/ or tv/ prefix)", type=str, dest='tmdb_manual')
@@ -106,6 +105,12 @@ class Args:
         parser.add_argument('-mbid', '--mbid', nargs=1, required=False, help="MusicBrainz release ID", type=str)
         parser.add_argument('-discogs', '--discogs', nargs=1, required=False, help="Discogs release ID", type=str, dest='discogs_id')
         parser.add_argument('-deezer', '--deezer', nargs=1, required=False, help="Deezer album ID", type=str, dest='deezer_id')
+        parser.add_argument('-btitle', '--book-title', '--book_title', nargs=1, required=False, help="Book/Audiobook title override", type=str, dest='book_title')
+        parser.add_argument('-author', '--author', nargs=1, required=False, help="Book/Audiobook author override", type=str, dest='book_author')
+        parser.add_argument('-narrator', '--narrator', nargs=1, required=False, help="Audiobook narrator override", type=str)
+        parser.add_argument('-isbn', '--isbn', '--book-isbn', '--book_isbn', nargs=1, required=False, help="Book ISBN override", type=str, dest='book_isbn')
+        parser.add_argument('-blang', '--book-language', '--book_language', nargs=1, required=False, help="Book/Audiobook language override", type=str, dest='book_language')
+        parser.add_argument('-pub', '--publisher', nargs=1, required=False, help="Book/Audiobook publisher override", type=str, dest='book_publisher')
         parser.add_argument('-g', '--tag', nargs='*', required=False, help="Group Tag", type=str)
         parser.add_argument('-serv', '--service', nargs='*', required=False, help="Streaming Service", type=str)
         parser.add_argument('-dist', '--distributor', nargs='*', required=False, help="Disc Distributor e.g.(Criterion, BFI, etc.)", type=str)

@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 """
 Config validation helper for Upload Assistant.
 Validates the user's config.py against expected structure and types.

@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import json
 import re
 from typing import TYPE_CHECKING, Any, Optional, cast

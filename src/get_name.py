@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import os
 import re
 import sys
@@ -141,6 +140,21 @@ class NameManager:
             if bracket:
                 name = f"{name} [{bracket}]"
             potential_missing = ['artist', 'album']
+        elif meta['category'] == "BOOK" or meta.get('is_book'):
+            author = str(meta.get('author', '')).strip()
+            book_title = str(meta.get('title', '')).strip()
+            book_type = str(meta.get('type', '')).strip().upper()
+            language = str(meta.get('book_language', '')).strip()
+            narrator = str(meta.get('narrator', '')).strip()
+            year_part = f"({year})" if year else ""
+            format_label = "AUDIOBOOK" if meta.get('is_audiobook') else "EBOOK"
+            bracket = ' '.join(part for part in [language, book_type, format_label] if part)
+            name = ' '.join(part for part in [f"{author} - {book_title}".strip(" -"), year_part] if part)
+            if narrator and meta.get('is_audiobook'):
+                name = f"{name} narrated by {narrator}"
+            if bracket:
+                name = f"{name} [{bracket}]"
+            potential_missing = ['author', 'title', 'book_language']
         elif meta['category'] == "MOVIE":  # MOVIE SPECIFIC
             if type == "DISC":  # Disk
                 if meta['is_disc'] == 'BDMV':

@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 # ruff: noqa: E402
 import asyncio
 import datetime

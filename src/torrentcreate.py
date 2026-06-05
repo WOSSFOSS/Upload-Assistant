@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
 import contextlib
 import fnmatch
@@ -217,7 +216,7 @@ class TorrentCreator:
                 include: list[str] = []
                 exclude: list[str] = []
 
-                if meta.get('is_music'):
+                if meta.get('is_music') or meta.get('is_book'):
                     include = []
                     exclude = []
                 elif meta['keep_folder']:

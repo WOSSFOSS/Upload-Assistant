@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
 import glob
 import json
@@ -79,6 +78,16 @@ class UNIT3D:
                 "name": music_name or str(meta.get("name", "")),
                 "perPage": "100",
             }
+        elif meta.get("is_book"):
+            book_name = " ".join(
+                part for part in [str(meta.get("author", "")).strip(), str(meta.get("title", "")).strip()]
+                if part
+            )
+            params_dict = {
+                "categories[]": category_id,
+                "name": book_name or str(meta.get("name", "")),
+                "perPage": "100",
+            }
         else:
             params_dict = {
                 "tmdbId": str(meta['tmdb']),
@@ -87,7 +96,7 @@ class UNIT3D:
                 "perPage": "100",
             }
         params_list: Optional[ParamsList] = None
-        if self.tracker not in ["OTW"] and not meta.get("is_music"):
+        if self.tracker not in ["OTW"] and not meta.get("is_music") and not meta.get("is_book"):
             resolutions = await self.get_resolution_id(meta)
             resolution_id = str(resolutions["resolution_id"])
             if resolution_id in ["3", "4"]:
@@ -100,10 +109,11 @@ class UNIT3D:
 
         if self.tracker not in ["SP", "STC"]:
             type_id = str((await self.get_type_id(meta))["type_id"])
-            if params_list is not None:
-                params_list.append(("types[]", type_id))
-            else:
-                params_dict["types[]"] = type_id
+            if type_id != "0":
+                if params_list is not None:
+                    params_list.append(("types[]", type_id))
+                else:
+                    params_dict["types[]"] = type_id
 
         if meta["category"] == "TV":
             season_value = f" {meta.get('season', '')}"
@@ -120,7 +130,7 @@ class UNIT3D:
         request_params = params_list if params_list is not None else list(params_dict.items())
 
         other_request_params: ParamsList = request_params
-        if not meta.get("is_music"):
+        if not meta.get("is_music") and not meta.get("is_book"):
             other_params_dict: dict[str, str] = {
                 "tmdbId": str(meta['tmdb']),
                 "categories[]": category_id,
@@ -230,7 +240,7 @@ class UNIT3D:
         return {"name": meta["name"]}
 
     async def get_description(self, meta: dict[str, Any]) -> dict[str, str]:
-        if meta.get("is_music"):
+        if meta.get("is_music") or meta.get("is_book"):
             description_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt"
             description = ""
             if os.path.exists(description_path):
@@ -499,6 +509,9 @@ class UNIT3D:
         merged: dict[str, str] = {}
         for r in results:
             merged.update(r)
+
+        if meta.get("is_book") and merged.get("type_id") == "0":
+            merged.pop("type_id", None)
 
         # Handle exclusive flag centrally for all UNIT3D trackers
         # Priority: meta['exclusive'] > tracker config > default (not set)

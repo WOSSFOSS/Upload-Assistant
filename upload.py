@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 import asyncio
 import contextlib
 import filecmp
@@ -643,21 +642,22 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
         # reset trackers after any removals
         trackers = meta['trackers']
 
-        audio_prompted = False
-        for tracker in ["AITHER", "ASC", "BJS", "BT", "CBR", "DP", "FF", "GPW", "HUNO", "IHD", "LDU", "LT", "OE", "PTS", "SAM", "SHRI", "SPD", "TTR", "TVC", "ULCX"]:
-            if tracker in trackers:
-                if not audio_prompted:
-                    await languages_manager.process_desc_language(meta, tracker=tracker)
-                    audio_prompted = True
-                else:
-                    if 'tracker_status' not in meta:
-                        meta['tracker_status'] = {}
-                    if tracker not in meta['tracker_status']:
-                        meta['tracker_status'][tracker] = {}
-                    if meta.get('unattended_audio_skip', False) or meta.get('unattended_subtitle_skip', False):
-                        meta['tracker_status'][tracker]['skip_upload'] = True
+        if not meta.get('is_music') and not meta.get('is_book'):
+            audio_prompted = False
+            for tracker in ["AITHER", "ASC", "BJS", "BT", "CBR", "DP", "FF", "GPW", "HUNO", "IHD", "LDU", "LT", "OE", "PTS", "SAM", "SHRI", "SPD", "TTR", "TVC", "ULCX"]:
+                if tracker in trackers:
+                    if not audio_prompted:
+                        await languages_manager.process_desc_language(meta, tracker=tracker)
+                        audio_prompted = True
                     else:
-                        meta['tracker_status'][tracker]['skip_upload'] = False
+                        if 'tracker_status' not in meta:
+                            meta['tracker_status'] = {}
+                        if tracker not in meta['tracker_status']:
+                            meta['tracker_status'][tracker] = {}
+                        if meta.get('unattended_audio_skip', False) or meta.get('unattended_subtitle_skip', False):
+                            meta['tracker_status'][tracker]['skip_upload'] = True
+                        else:
+                            meta['tracker_status'][tracker]['skip_upload'] = False
 
         await asyncio.sleep(0.2)
         async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/meta.json", 'w', encoding='utf-8') as f:
@@ -765,10 +765,10 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
                 meta['manual_frames'] = ""
             manual_frames = meta['manual_frames']
 
-            if meta.get('comparison', False) and not meta.get('is_music'):
+            if meta.get('comparison', False) and not meta.get('is_music') and not meta.get('is_book'):
                 await ComparisonManager(meta, config).add_comparison()
 
-            elif not meta.get('is_music'):
+            elif not meta.get('is_music') and not meta.get('is_book'):
                 image_data_file = f"{meta['base_dir']}/tmp/{meta['uuid']}/image_data.json"
                 if os.path.exists(image_data_file) and not meta.get('image_list'):
                     try:
@@ -1120,7 +1120,7 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
             async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/meta.json", 'w', encoding='utf-8') as f:
                 await f.write(json.dumps(meta, indent=4))
 
-            if not meta.get('is_music') and 'image_list' in meta and meta['image_list']:
+            if not meta.get('is_music') and not meta.get('is_book') and 'image_list' in meta and meta['image_list']:
                 try:
                     image_list = cast(list[Any], meta.get('image_list') or [])
                     image_data = {
@@ -1302,7 +1302,7 @@ async def ensure_base_torrent_for_upload(meta: Meta, config: dict[str, Any], cli
             meta.get('rehash', False) is False
             and not meta.get('base_torrent_created', False)
             and not meta.get('we_checked_them_all', False)
-            and (explicit_torrent_ref or (not meta.get('skip_auto_torrent', False) and not meta.get('is_music', False)))
+            and (explicit_torrent_ref or (not meta.get('skip_auto_torrent', False) and not meta.get('is_music', False) and not meta.get('is_book', False)))
         )
         if search_existing_torrent:
             reuse_torrent = await client.find_existing_torrent(meta)
@@ -1870,7 +1870,7 @@ async def do_the_thing(base_dir: str) -> None:
                 await tracker_setup.make_trumpable_report(meta, tracker)
 
             find_requests = config['DEFAULT'].get('search_requests', False) if meta.get('search_requests') is None else meta.get('search_requests')
-            if find_requests and not meta.get('is_music') and meta['trackers'] not in ([], None, "") and not (meta.get('site_check', False) and not meta['is_disc']):
+            if find_requests and not meta.get('is_music') and not meta.get('is_book') and meta['trackers'] not in ([], None, "") and not (meta.get('site_check', False) and not meta['is_disc']):
                 console.print("[green]Searching for requests on supported trackers.....")
                 if meta.get('site_check', False):
                     trackers = meta['requested_trackers']

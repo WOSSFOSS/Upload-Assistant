@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 from typing import Any, Callable, Optional, cast
 
 console: Any = None
@@ -34,6 +33,7 @@ try:
     from src.is_scene import SceneManager
     from src.languages import languages_manager
     from src.metadata_searching import MetadataSearchingManager
+    from src.books import BookProcessor, is_book_path
     from src.music import MusicProcessor, is_music_path
     from src.radarr import RadarrManager
     from src.region import get_distributor, get_region, get_service
@@ -166,6 +166,25 @@ class Prep:
 
         if meta['debug']:
             console.print(f"[cyan]ID: {meta['uuid']}")
+
+        manual_category = str(meta.get('manual_category') or '').strip().upper()
+        if manual_category == 'BOOK' or is_book_path(meta['path']):
+            console.print("[yellow]Processing as book/audiobook[/yellow]")
+            book_processor = BookProcessor(self.config, base_dir)
+            meta = await book_processor.process(meta)
+
+            if not meta.get('emby') and meta.get('trackers'):
+                trackers = meta['trackers']
+            else:
+                default_trackers = self.config['TRACKERS'].get('default_trackers', '')
+                trackers = [tracker.strip() for tracker in default_trackers.split(',')]
+            if isinstance(trackers, str):
+                trackers = [t.strip().upper() for t in trackers.split(',')] if "," in trackers else [trackers.strip().upper()]
+            else:
+                trackers = [t.strip().upper() for t in trackers]
+            meta['trackers'] = trackers
+            meta['requested_trackers'] = trackers
+            return meta
 
         if is_music_path(meta['path']):
             console.print("[yellow]Processing as music[/yellow]")

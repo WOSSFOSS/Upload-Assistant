@@ -1,4 +1,3 @@
-# Upload Assistant © 2025 Audionut & wastaken7 — Licensed under UAPL v1.0
 from typing import Any, Optional
 
 from src.console import console
@@ -27,7 +26,7 @@ class LST(UNIT3D):
 
     async def get_additional_checks(self, meta: Meta) -> bool:
         should_continue = True
-        if meta.get('is_music'):
+        if meta.get('is_music') or meta.get('is_book'):
             return should_continue
 
         if not meta['valid_mi_settings']:
