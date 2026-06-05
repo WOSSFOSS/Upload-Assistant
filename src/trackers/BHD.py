@@ -601,7 +601,7 @@ class BHD:
         draft_value = self.config['TRACKERS'][self.tracker].get('draft_default', False)
         draft_bool = draft_value if isinstance(draft_value, bool) else self._is_true(str(draft_value).strip())
 
-        draft_int = 0 if draft_bool or meta.get('draft') else 1
+        draft_int = 0 if draft_bool or meta.get('draft') or meta.get(f'{self.tracker}_draft') else 1
 
         return draft_int
 

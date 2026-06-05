@@ -23,6 +23,17 @@ from src.uphelper import UploadHelper
 Meta: TypeAlias = MutableMapping[str, Any]
 
 
+UPLOAD_MODE_CAPABILITIES: dict[str, str] = {
+    'A4K': 'modq',
+    'AITHER': 'modq',
+    'BHD': 'draft',
+    'BLU': 'modq',
+    'LST': 'modq',
+    'LT': 'modq',
+    'LUME': 'modq',
+}
+
+
 class TrackerStatusManager:
     def __init__(self, config: dict[str, Any]) -> None:
         self.config = config
@@ -209,14 +220,40 @@ class TrackerStatusManager:
                             try:
                                 if helper._needs_low_res_h265_warning(local_meta):
                                     console.print("[bold red]Warning: 1080p or lower x265/H.265/HEVC encodes may be forbidden on some trackers.[/bold red]")
-                                edit_choice = cli_ui.ask_string(
-                                    "Enter 'y' to upload, or press enter to skip uploading:"
-                                )
-                                if (edit_choice or "").lower() == 'y':
-                                    local_tracker_status['upload'] = True
-                                    successful_trackers += 1
-                                else:
+                                upload_mode = UPLOAD_MODE_CAPABILITIES.get(tracker_name)
+                                prompt = "Enter 'y' to upload, or press enter to skip uploading:"
+                                if upload_mode:
+                                    prompt = "Enter 'y' to upload, enter 'modq' for moderation/draft, or press enter to skip uploading:"
+
+                                while True:
+                                    edit_choice = (cli_ui.ask_string(prompt) or "").strip().lower()
+
+                                    if edit_choice == 'modq' and upload_mode:
+                                        confirm_message = (
+                                            f"Send upload to {tracker_name} draft?"
+                                            if upload_mode == 'draft'
+                                            else f"Send upload to {tracker_name} moderation queue?"
+                                        )
+                                        if not cli_ui.ask_yes_no(confirm_message, default=False):
+                                            console.print("[yellow]Selection cancelled. Choose again.[/yellow]")
+                                            continue
+                                        if upload_mode == 'draft':
+                                            local_meta[f'{tracker_name}_draft'] = True
+                                            async with meta_lock:
+                                                meta[f'{tracker_name}_draft'] = True
+                                        else:
+                                            local_meta[f'{tracker_name}_modq'] = True
+                                            async with meta_lock:
+                                                meta[f'{tracker_name}_modq'] = True
+                                        local_tracker_status['upload'] = True
+                                        successful_trackers += 1
+                                        break
+                                    if edit_choice == 'y':
+                                        local_tracker_status['upload'] = True
+                                        successful_trackers += 1
+                                        break
                                     local_tracker_status['upload'] = False
+                                    break
                             except EOFError:
                                 console.print("\n[red]Exiting on user request (Ctrl+C)[/red]")
                                 await cleanup_manager.cleanup()

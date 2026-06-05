@@ -328,6 +328,9 @@ class UNIT3D:
         return data
 
     async def get_flag(self, meta: dict[str, Any], flag_name: str) -> str:
+        tracker_flag = meta.get(f'{self.tracker}_{flag_name}')
+        if tracker_flag is not None:
+            return "1" if tracker_flag else "0"
         config_flag = self.tracker_config.get(flag_name)
         if meta.get(flag_name, False):
             return "1"
