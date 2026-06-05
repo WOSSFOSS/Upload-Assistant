@@ -73,6 +73,9 @@ def _mi_value(*values: Any) -> str:
 
 def _clean_text(value: str) -> str:
     value = html.unescape(value or "")
+    if any(0x80 <= ord(char) <= 0x9F for char in value):
+        with contextlib.suppress(Exception):
+            value = value.encode("latin-1", errors="ignore").decode("cp1252", errors="ignore")
     value = re.sub(r"<[^>]+>", "", value)
     return re.sub(r"\s+", " ", value).strip()
 
@@ -156,8 +159,10 @@ class BookProcessor:
         self._apply_cli_overrides(meta)
 
         if meta.get("isbn"):
-            google_metadata = await self._google_books_lookup(str(meta["isbn"]), meta)
-            self._apply_metadata(meta, google_metadata or {}, overwrite=False)
+            book_metadata = await self._google_books_lookup(str(meta["isbn"]), meta)
+            if not book_metadata:
+                book_metadata = await self._open_library_lookup(str(meta["isbn"]), meta)
+            self._apply_metadata(meta, book_metadata or {}, overwrite=False)
             self._apply_cli_overrides(meta)
 
         title = _mi_value(meta.get("title"), meta.get("book_title"), primary_file.stem)
@@ -200,9 +205,9 @@ class BookProcessor:
             "type": book_type,
             "source": "AUDIBLE" if is_audiobook and "audible" in path.name.lower() else "WEB",
             "audio": book_type if is_audiobook else "",
-            "tag": meta.get("tag", ""),
+            "tag": meta.get("tag") or "",
             "stream": 0,
-            "keywords": meta.get("keywords", ""),
+            "keywords": meta.get("keywords") or "",
             "video": os.fspath(primary_file),
             "filelist": [os.fspath(p) for p in book_files],
             "book_files": [os.fspath(p) for p in book_files],
@@ -434,6 +439,63 @@ class BookProcessor:
                     console.print(f"[yellow]Google Books lookup failed for ISBN {clean_isbn}: {e}[/yellow]")
                 return None
         return self._parse_google_books(data, clean_isbn)
+
+    async def _open_library_lookup(self, isbn: str, meta: dict[str, Any]) -> Optional[dict[str, Any]]:
+        clean_isbn = _clean_isbn(isbn)
+        if not clean_isbn:
+            return None
+        cache_dir = Path(meta["base_dir"]) / "tmp" / "open_library_cache"
+        cache_file = cache_dir / f"{clean_isbn}.json"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        data: Optional[dict[str, Any]] = None
+        if cache_file.exists():
+            with contextlib.suppress(Exception):
+                async with aiofiles.open(cache_file, encoding="utf-8") as f:
+                    cached = json.loads(await f.read())
+                    data = cached if isinstance(cached, dict) else None
+        if data is None:
+            try:
+                async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers={"User-Agent": self.user_agent}) as client:
+                    response = await client.get(f"https://openlibrary.org/isbn/{clean_isbn}.json")
+                    response.raise_for_status()
+                    data = response.json()
+                async with aiofiles.open(cache_file, "w", encoding="utf-8") as f:
+                    await f.write(json.dumps(data, indent=2))
+            except Exception as e:
+                if meta.get("debug"):
+                    console.print(f"[yellow]Open Library lookup failed for ISBN {clean_isbn}: {e}[/yellow]")
+                return None
+        return self._parse_open_library(data, clean_isbn)
+
+    def _parse_open_library(self, data: dict[str, Any], isbn: str) -> Optional[dict[str, Any]]:
+        if not isinstance(data, dict) or not data:
+            return None
+        metadata: dict[str, Any] = {"isbn": isbn}
+        metadata["title"] = _mi_value(data.get("title"))
+        if isinstance(data.get("publishers"), list):
+            metadata["publisher"] = ", ".join(str(pub) for pub in data["publishers"] if pub)
+        metadata["year"] = self._extract_year(_mi_value(data.get("publish_date")))
+        description = data.get("description")
+        if isinstance(description, dict):
+            metadata["overview"] = _clean_text(_mi_value(description.get("value")))
+        else:
+            metadata["overview"] = _clean_text(_mi_value(description))
+        subjects = data.get("subjects")
+        if isinstance(subjects, list):
+            metadata["genres"] = ", ".join(str(subject) for subject in subjects[:8] if subject)
+        languages = data.get("languages")
+        if isinstance(languages, list) and languages:
+            key = _mi_value(languages[0].get("key") if isinstance(languages[0], dict) else "")
+            if key:
+                full, iso = _resolve_language(key.rsplit("/", 1)[-1])
+                if _is_valid_language(full, iso):
+                    metadata["book_language"] = full
+                    metadata["book_language_iso"] = iso
+        covers = data.get("covers")
+        if isinstance(covers, list) and covers:
+            metadata["poster"] = f"https://covers.openlibrary.org/b/id/{covers[0]}-L.jpg"
+        metadata["open_library_link"] = f"https://openlibrary.org/isbn/{isbn}"
+        return {key: value for key, value in metadata.items() if value}
 
     def _parse_google_books(self, data: dict[str, Any], isbn: str) -> Optional[dict[str, Any]]:
         items = data.get("items") if isinstance(data, dict) else None

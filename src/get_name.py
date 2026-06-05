@@ -68,7 +68,7 @@ class NameManager:
         part = str(meta.get('part', ""))
         repack = str(meta.get('repack', ""))
         three_d = str(meta.get('3D', ""))
-        tag = str(meta.get('tag', ""))
+        tag = str(meta.get('tag') or "")
         source = str(meta.get('source', ""))
         uhd = str(meta.get('uhd', ""))
         hdr = str(meta.get('hdr', ""))
