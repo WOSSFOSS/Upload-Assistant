@@ -1293,7 +1293,14 @@ async def ensure_base_torrent_for_upload(meta: Meta, config: dict[str, Any], cli
 
     if not os.path.exists(torrent_path):
         reuse_torrent = None
-        if meta.get('rehash', False) is False and not meta.get('base_torrent_created', False) and not meta.get('we_checked_them_all', False):
+        explicit_torrent_ref = any(meta.get(key) for key in ('infohash', 'torrenthash', 'torrent_hash'))
+        search_existing_torrent = (
+            meta.get('rehash', False) is False
+            and not meta.get('base_torrent_created', False)
+            and not meta.get('we_checked_them_all', False)
+            and (explicit_torrent_ref or (not meta.get('skip_auto_torrent', False) and not meta.get('is_music', False)))
+        )
+        if search_existing_torrent:
             reuse_torrent = await client.find_existing_torrent(meta)
             if reuse_torrent is not None:
                 await TorrentCreator.create_base_from_existing_torrent(reuse_torrent, meta['base_dir'], meta['uuid'])
