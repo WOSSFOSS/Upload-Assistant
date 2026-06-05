@@ -387,7 +387,7 @@ class BookProcessor:
                     metadata["isbn"] = isbn
                 scheme = str(elem.attrib.get("{http://www.idpf.org/2007/opf}scheme") or elem.attrib.get("scheme") or "").upper()
                 if scheme == "GOOGLE" and value:
-                    metadata["google_books_link"] = f"https://books.google.com/books?id={value}"
+                    metadata["google_books_id"] = value
                 elif scheme in {"BARNESNOBLE", "BN"} and value:
                     metadata["barnes_noble_link"] = f"https://www.barnesandnoble.com/w/{value}"
             elif tag == "description":
@@ -687,6 +687,7 @@ class BookProcessor:
         elif items[0].get("id"):
             metadata["poster"] = f"https://books.google.com/books/content?id={items[0]['id']}&printsec=frontcover&img=1"
         metadata["google_books_link"] = volume.get("infoLink", "")
+        metadata["google_books_link_source"] = "api"
         return {key: value for key, value in metadata.items() if value}
 
     async def _parse_mediainfo(self, path: Path) -> dict[str, Any]:
@@ -810,13 +811,18 @@ class BookProcessor:
             ("ISBN", meta.get("isbn")),
             ("Series", meta.get("book_series")),
             ("Book Number", meta.get("book_number")),
-            ("Format", "Audiobook" if meta.get("is_audiobook") else "eBook"),
+            ("Format", self._book_format_display(meta)),
             ("Release", self._book_release_flags(meta)),
-            ("Files", meta.get("book_file_count")),
             ("Duration", meta.get("audiobook_duration_formatted")),
             ("Bitrate", f"{meta.get('audiobook_bitrate')} kb/s" if meta.get("audiobook_bitrate") else ""),
         ]
         return [f"{label}: {value}" for label, value in info if _mi_value(value)]
+
+    def _book_format_display(self, meta: dict[str, Any]) -> str:
+        formats = meta.get("book_formats")
+        if isinstance(formats, list) and formats:
+            return " / ".join(str(fmt) for fmt in formats if fmt)
+        return _mi_value(meta.get("type"), "Audiobook" if meta.get("is_audiobook") else "")
 
     def _book_release_flags(self, meta: dict[str, Any]) -> str:
         flags: list[str] = []
@@ -834,7 +840,7 @@ class BookProcessor:
 
     def _book_links(self, meta: dict[str, Any]) -> list[str]:
         links: list[str] = []
-        if meta.get("google_books_link"):
+        if meta.get("google_books_link") and meta.get("google_books_link_source") == "api":
             links.append(self._book_link_line("Google Books", str(meta["google_books_link"])))
         if meta.get("open_library_link"):
             links.append(self._book_link_line("Open Library", str(meta["open_library_link"])))

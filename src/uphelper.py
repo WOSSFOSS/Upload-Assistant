@@ -680,8 +680,7 @@ class UploadHelper:
                 console.print(' / '.join(info_parts))
                 console.print()
             console.print(f"[bold]Name:[/bold] {meta['name']}")
-            console.print(f"[bold]Files:[/bold] {meta.get('book_file_count', 0)}")
-            if meta.get('google_books_link'):
+            if meta.get('google_books_link') and meta.get('google_books_link_source') == 'api':
                 console.print(f"[bold]Google Books:[/bold] {meta['google_books_link']}")
             if meta.get('open_library_link'):
                 console.print(f"[bold]Open Library:[/bold] {meta['open_library_link']}")
