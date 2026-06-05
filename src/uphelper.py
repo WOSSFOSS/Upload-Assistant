@@ -79,6 +79,18 @@ class UploadHelper:
         return UploadHelper._format_size(size_bytes) or "0.00 MiB"
 
     async def dupe_check(self, dupes: list[Union[DupeEntry, str]], meta: Meta, tracker_name: str) -> tuple[bool, Meta]:
+        source_size = self._format_size(meta.get('source_size'))
+        if source_size is None and meta.get('is_disc') != "BDMV":
+            mediainfo = cast(dict[str, Any], meta.get('mediainfo', {}))
+            tracks = cast(list[dict[str, Any]], mediainfo.get('media', {}).get('track', []))
+            if tracks:
+                source_size = self._format_size(tracks[0].get('FileSize'))
+
+        def _format_dupe_size(size: str) -> str:
+            if source_size is not None and size == source_size:
+                return f"[bold red]{size}[/bold red]"
+            return size
+
         def _format_dupe(entry: Union[DupeEntry, str]) -> str:
             if isinstance(entry, dict):
                 name = str(entry.get('name', ''))
@@ -86,7 +98,7 @@ class UploadHelper:
                 link = entry.get('link')
                 parts = [name]
                 if size:
-                    parts.append(f"Size: {size}")
+                    parts.append(f"Size: {_format_dupe_size(size)}")
                 if link is not None and str(link):
                     parts.append(str(link))
                 return " - ".join(part for part in parts if part)
@@ -215,7 +227,7 @@ class UploadHelper:
                         exact_match_text = str(meta["filename_match"])
                         exact_match_size = self._format_size(meta.get(f'{tracker_name}_matched_size'))
                         if exact_match_size and "Size:" not in exact_match_text:
-                            exact_match_text = f"{exact_match_text} - Size: {exact_match_size}"
+                            exact_match_text = f"{exact_match_text} - Size: {_format_dupe_size(exact_match_size)}"
                         console.print(f'[bold red]Exact match found! - {exact_match_text}[/bold red]')
                         try:
                             if tracker_name in ["AITHER", "LST"]:
