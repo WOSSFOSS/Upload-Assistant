@@ -1285,7 +1285,7 @@ def extract_changelog(content: str, to_version: str) -> Optional[str]:
 
 async def update_notification(base_dir: str) -> Optional[str]:
     version_file = os.path.join(base_dir, 'data', 'version.py')
-    remote_version_url = 'https://github.com/fr1day13/Upload-Assistant'
+    remote_version_url = 'https://raw.githubusercontent.com/fr1day13/Upload-Assistant/master/data/version.py'
 
     notice = config['DEFAULT'].get('update_notification', True)
     verbose = config['DEFAULT'].get('verbose_notification', False)
