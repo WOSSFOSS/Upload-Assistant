@@ -37,8 +37,12 @@ class ZNTH(UNIT3D):
         category_id = {
             'MOVIE': '1',
             'TV': '2',
+            'GAMES': '3',
             'MUSIC_SINGLE': '4',
             'MUSIC': '5',
+            'BOOKS': '6',
+            'AUDIOBOOKS': '7',
+
         }
         if mapping_only:
             return category_id

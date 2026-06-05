@@ -198,6 +198,12 @@ class LanguagesManager:
             meta['tracker_status'] = {}
         if tracker not in meta['tracker_status']:
             meta['tracker_status'][tracker] = {}
+        if meta.get('is_music'):
+            meta['language_checked'] = True
+            meta['audio_languages'] = meta.get('audio_languages') or []
+            meta['subtitle_languages'] = meta.get('subtitle_languages') or []
+            meta['tracker_status'][tracker].setdefault('skip_upload', False)
+            return None
         if 'unattended_audio_skip' not in meta:
             meta['unattended_audio_skip'] = False
         if 'unattended_subtitle_skip' not in meta:

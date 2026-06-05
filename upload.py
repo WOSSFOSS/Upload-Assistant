@@ -765,10 +765,10 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
                 meta['manual_frames'] = ""
             manual_frames = meta['manual_frames']
 
-            if meta.get('comparison', False):
+            if meta.get('comparison', False) and not meta.get('is_music'):
                 await ComparisonManager(meta, config).add_comparison()
 
-            else:
+            elif not meta.get('is_music'):
                 image_data_file = f"{meta['base_dir']}/tmp/{meta['uuid']}/image_data.json"
                 if os.path.exists(image_data_file) and not meta.get('image_list'):
                     try:
@@ -1113,25 +1113,29 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
                 elif meta.get('skip_imghost_upload', False) is True and meta.get('image_list', False) is False:
                     meta['image_list'] = []
 
-                async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/meta.json", 'w', encoding='utf-8') as f:
-                    await f.write(json.dumps(meta, indent=4))
+            else:
+                meta['image_list'] = []
+                meta['screens'] = 0
 
-                if 'image_list' in meta and meta['image_list']:
-                    try:
-                        image_list = cast(list[Any], meta.get('image_list') or [])
-                        image_data = {
-                            "image_list": image_list,
-                            "image_sizes": meta.get('image_sizes', {}),
-                            "tonemapped": meta.get('tonemapped', False)
-                        }
+            async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/meta.json", 'w', encoding='utf-8') as f:
+                await f.write(json.dumps(meta, indent=4))
 
-                        async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/image_data.json", 'w', encoding='utf-8') as img_file:
-                            await img_file.write(json.dumps(image_data, indent=4))
+            if not meta.get('is_music') and 'image_list' in meta and meta['image_list']:
+                try:
+                    image_list = cast(list[Any], meta.get('image_list') or [])
+                    image_data = {
+                        "image_list": image_list,
+                        "image_sizes": meta.get('image_sizes', {}),
+                        "tonemapped": meta.get('tonemapped', False)
+                    }
 
-                        if meta.get('debug'):
-                            console.print(f"[cyan]Saved {len(image_list)} images to image_data.json")
-                    except Exception as e:
-                        console.print(f"[yellow]Failed to save image data: {str(e)}")
+                    async with aiofiles.open(f"{meta['base_dir']}/tmp/{meta['uuid']}/image_data.json", 'w', encoding='utf-8') as img_file:
+                        await img_file.write(json.dumps(image_data, indent=4))
+
+                    if meta.get('debug'):
+                        console.print(f"[cyan]Saved {len(image_list)} images to image_data.json")
+                except Exception as e:
+                    console.print(f"[yellow]Failed to save image data: {str(e)}")
         finally:
             progress_task.cancel()
             with contextlib.suppress(asyncio.CancelledError):
