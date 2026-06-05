@@ -124,6 +124,31 @@ class UploadHelper:
         return []
 
     @staticmethod
+    def _is_english_language(value: Any) -> bool:
+        language = UploadHelper._mi_value(value).lower().replace("_", "-")
+        if not language:
+            return False
+        language_parts = [part.strip() for part in re.split(r"[,;/]", language) if part.strip()]
+        if not language_parts:
+            language_parts = [language]
+        return any(
+            part in {"en", "eng", "english"} or part.startswith("en-")
+            for part in language_parts
+        )
+
+    @staticmethod
+    def _needs_missing_english_sub_warning(meta: Meta) -> bool:
+        tracks = UploadHelper._get_mediainfo_tracks(meta)
+        audio_tracks = [track for track in tracks if track.get('@type') == 'Audio']
+        subtitle_tracks = [track for track in tracks if track.get('@type') == 'Text']
+        if not audio_tracks:
+            return False
+
+        has_english_audio = any(UploadHelper._is_english_language(track.get('Language')) for track in audio_tracks)
+        has_english_subtitle = any(UploadHelper._is_english_language(track.get('Language')) for track in subtitle_tracks)
+        return not has_english_audio and not has_english_subtitle
+
+    @staticmethod
     def _format_confirm_media_lines(meta: Meta) -> list[str]:
         tracks = UploadHelper._get_mediainfo_tracks(meta)
         if not tracks:
@@ -576,6 +601,8 @@ class UploadHelper:
                 console.print(f"[bold]Name:[/bold] {meta['name']}")
                 for media_line in self._format_confirm_media_lines(meta):
                     console.print(media_line)
+                if self._needs_missing_english_sub_warning(meta):
+                    console.print("[bold red]Warning: No English audio and no English subtitles found. This may be forbidden on some trackers.[/bold red]")
                 console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
                 confirm = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N[/yellow]: ").strip().lower() == 'y'
             elif not meta.get('emby_debug', False):
