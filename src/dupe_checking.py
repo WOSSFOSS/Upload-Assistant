@@ -28,6 +28,7 @@ class DupeEntry(TypedDict, total=False):
     internal: Union[int, bool]
     bd_info: Optional[str]
     description: Optional[str]
+    other_upload: bool
 
 
 DupeInput: TypeAlias = Union[str, DupeEntry, MutableMapping[str, Any]]
@@ -97,6 +98,7 @@ class DupeChecker:
                     'internal': 0,
                     'bd_info': None,
                     'description': None,
+                    'other_upload': False,
                 })
             elif isinstance(d, dict):
                 raw_entry = cast(MutableMapping[str, Any], d)
@@ -145,6 +147,7 @@ class DupeChecker:
                     'internal': d.get('internal', 0),
                     'bd_info': d.get('bd_info', ''),
                     'description': d.get('description', ''),
+                    'other_upload': bool(d.get('other_upload', False)),
                 }
 
                 # Case 3: Dict with files and file_count
@@ -244,6 +247,10 @@ class DupeChecker:
 
             files_value = cast(list[Any], entry.get('files') or [])
             files = [str(file) for file in files_value]
+
+            if entry.get('other_upload', False):
+                await log_exclusion("other upload display entry", each)
+                return True
 
             # Handle case where files might be comma-separated strings in a list
             if files and len(files) == 1 and ',' in files[0]:
