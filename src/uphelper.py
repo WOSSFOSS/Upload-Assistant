@@ -234,6 +234,10 @@ class UploadHelper:
                 return f"[bold red]{size}[/bold red]"
             return size
 
+        def _print_low_res_h265_warning() -> None:
+            if self._needs_low_res_h265_warning(meta):
+                console.print("[bold red]Warning: 1080p or lower x265/H.265/HEVC encodes may be forbidden on some trackers.[/bold red]")
+
         def _format_dupe(entry: Union[DupeEntry, str]) -> str:
             if isinstance(entry, dict):
                 name = str(entry.get('name', ''))
@@ -418,6 +422,7 @@ class UploadHelper:
                                     if not meta.get(f'{tracker_name}_trumpable_id'):
                                         meta[f'{tracker_name}_trumpable_id'] = meta.get(f'{tracker_name}_matched_id', None)
                             else:
+                                _print_low_res_h265_warning()
                                 upload = cli_ui.ask_yes_no(f"Upload to {tracker_name} anyway?", default=False)
                                 meta['we_asked'] = True
                         except EOFError:
@@ -449,6 +454,7 @@ class UploadHelper:
                             try:
                                 if meta.get('is_disc') == "BDMV":
                                     self.ask_bdinfo_comparison(meta, dupes_list, tracker_name)
+                                _print_low_res_h265_warning()
                                 upload = cli_ui.ask_yes_no(f"Upload to {tracker_name} anyway?", default=False)
                                 meta['we_asked'] = True
                             except EOFError:
@@ -662,8 +668,6 @@ class UploadHelper:
                     console.print(media_line)
                 if self._needs_missing_english_sub_warning(meta):
                     console.print("[bold red]Warning: No English audio and no English subtitles found. This may be forbidden on some trackers.[/bold red]")
-                if self._needs_low_res_h265_warning(meta):
-                    console.print("[bold red]Warning: 1080p or lower x265/H.265/HEVC encodes may be forbidden on some trackers.[/bold red]")
                 console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
                 confirm = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N[/yellow]: ").strip().lower() == 'y'
             elif not meta.get('emby_debug', False):
