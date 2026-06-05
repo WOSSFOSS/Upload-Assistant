@@ -370,6 +370,10 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                     'torrent_path': resolved_path,
                     'piece_size': torrent.piece_size,
                 })
+                if not (prefer_small_pieces or mtv_torrent or piece_limit):
+                    if meta.get('debug'):
+                        console.print(f"[cyan]Scanned {scanned} .torrent files for existing torrent reuse[/cyan]")
+                    return str(resolved_path)
 
         if meta.get('debug'):
             console.print(f"[cyan]Scanned {scanned} .torrent files for existing torrent reuse[/cyan]")

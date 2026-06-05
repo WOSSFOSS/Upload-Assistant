@@ -1209,13 +1209,11 @@ class QbittorrentClientMixin:
                     meta.update(tracker_ids)
 
                 meta['infohash'] = torrent_hash
-                if not meta.get('base_torrent_created'):
-                    valid, resolved_path = await self.is_valid_torrent(meta, str(torrent_file_path), torrent_hash, 'qbit', client_config)
-                    if valid:
-                        await TorrentCreator.create_base_from_existing_torrent(resolved_path, meta['base_dir'], meta['uuid'])
-                        meta['base_torrent_created'] = True
 
                 matches.append(match_info)
+                if meta.get('debug'):
+                    console.print(f"[cyan]Scanned {scanned} .torrent files for qBittorrent file search[/cyan]")
+                return matches
 
         if meta.get('debug'):
             console.print(f"[cyan]Scanned {scanned} .torrent files for qBittorrent file search[/cyan]")

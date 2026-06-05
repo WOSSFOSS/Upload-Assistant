@@ -559,9 +559,9 @@ class Prep:
         meta['trackers'] = trackers
         meta['requested_trackers'] = trackers
 
-        # auto torrent searching with qbittorrent that grabs torrent ids for metadata searching
-        if not any(meta.get(id_type) for id_type in hash_ids + tracker_ids) and not meta.get('skip_trackers', False) and not meta.get('edit', False):
-            await client.get_pathed_torrents(meta['path'], meta)
+        # Existing torrent reuse is intentionally deferred until after tracker upload confirmation.
+        # Large qBittorrent clients can be very slow to search, and this work is wasted if the
+        # upload is skipped because of dupes or user choice.
 
         if meta['debug']:
             pathed_time_end = time.time()
