@@ -537,7 +537,7 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
         sys.exit(1)
     while confirm is False:
         try:
-            editargs_str = cli_ui.ask_string("Input args that need correction e.g. (--tag NTb --category tv --tmdb 12345)")
+            editargs_str = cli_ui.ask_string("Input args that need correction e.g. (--tag NTb --category tv --tmdb 12345), or press Enter/back to return")
         except EOFError:
             console.print("\n[red]Exiting on user request (Ctrl+C)[/red]")
             await cleanup_manager.cleanup()
@@ -548,7 +548,23 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
             break
 
         if not editargs_str or not editargs_str.strip():
-            console.print("[yellow]No input provided. Please enter arguments, type `continue` to continue or press Ctrl+C to exit.[/yellow]")
+            try:
+                confirm = await helper.get_confirmation(meta)
+            except EOFError:
+                console.print("\n[red]Exiting on user request (Ctrl+C)[/red]")
+                await cleanup_manager.cleanup()
+                cleanup_manager.reset_terminal()
+                sys.exit(1)
+            continue
+
+        if editargs_str.strip().lower() in {"back", "b", "cancel"}:
+            try:
+                confirm = await helper.get_confirmation(meta)
+            except EOFError:
+                console.print("\n[red]Exiting on user request (Ctrl+C)[/red]")
+                await cleanup_manager.cleanup()
+                cleanup_manager.reset_terminal()
+                sys.exit(1)
             continue
 
         try:
