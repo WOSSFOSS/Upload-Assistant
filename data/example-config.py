@@ -352,6 +352,9 @@ config = {
         # Which trackers do you want to upload to?
         # Available tracker: A4K, ACM, AITHER, ANT, AR, ASC, AZ, BHD, BHDTV, BJS, BLU, BT, CBR, CZ, DC, DP, DT, EMUW, FF, FL, FNP, FRIKI, GPW, HDB, HDS, HDT, HHD, HUNO, IHD, IS, ITT, LCD, LDU, LST, LT, LUME, MTV, NBL, OE, OTW, PHD, PT, PTER, PTP, PTS, PTT, R4E, RAS, RF, RTF, SAM, SHRI, SN, SP, SPD, STC, THR, TIK, TL, TLZ, TOS, TTG, TTR, TVC, ULCX, UTP, YOINK, YUS, ZNTH
         # Only add the trackers you want to upload to on a regular basis
+        # Optional per-tracker torrent client overrides can be set in any tracker block:
+        # "client_category": "tracker_uploads" sets the qBitTorrent category, or rTorrent/Transmission label.
+        # Client-specific keys like "qbit_cat", "rtorrent_label", or "transmission_label" override the generic value.
         "default_trackers": "",
 
         "A4K": {
@@ -389,6 +392,8 @@ config = {
             "announce_url": "https://znth.cx/announce/YOUR_PASSKEY",
             "anon": False,
             "modq": False,
+            # Optional torrent client category/label override for this tracker.
+            "client_category": "",
         },
         "ANT": {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name

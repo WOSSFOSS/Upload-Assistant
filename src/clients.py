@@ -171,19 +171,61 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                 console.print(f"[bold green]Adding to {client_name} ({torrent_client})")
 
             try:
+                client_meta = self._apply_tracker_client_overrides(meta, tracker, torrent_client)
                 if torrent_client.lower() == "rtorrent":
-                    self.rtorrent(meta['path'], torrent_path, torrent, meta, local_path, remote_path, client, tracker)
+                    self.rtorrent(meta['path'], torrent_path, torrent, client_meta, local_path, remote_path, client, tracker)
                 elif torrent_client == "qbit":
-                    await self.qbittorrent(meta['path'], torrent, local_path, remote_path, client, meta['is_disc'], meta['filelist'], meta, tracker, cross)
+                    await self.qbittorrent(meta['path'], torrent, local_path, remote_path, client, client_meta['is_disc'], client_meta['filelist'], client_meta, tracker, cross)
                 elif torrent_client.lower() == "deluge":
-                    self.deluge(meta['path'], torrent_path, torrent, local_path, remote_path, client, meta)
+                    self.deluge(meta['path'], torrent_path, torrent, local_path, remote_path, client, client_meta)
                 elif torrent_client.lower() == "transmission":
-                    self.transmission(meta['path'], torrent, local_path, remote_path, client, meta)
+                    self.transmission(meta['path'], torrent, local_path, remote_path, client, client_meta)
                 elif torrent_client.lower() == "watch":
                     shutil.copy(torrent_path, client['watch_folder'])
             except Exception as e:
                 console.print(f"[bold red]Failed to add torrent to {client_name}: {e}")
         return
+
+    def _apply_tracker_client_overrides(self, meta: dict[str, Any], tracker: str, torrent_client: str) -> dict[str, Any]:
+        tracker_cfg = self.config.get('TRACKERS', {}).get(tracker, {})
+        if not isinstance(tracker_cfg, dict):
+            return meta
+
+        overrides: dict[str, Any] = {}
+        generic_category = (
+            meta.get('client_category')
+            or meta.get('torrent_client_category')
+            or tracker_cfg.get('client_category')
+            or tracker_cfg.get('torrent_client_category')
+        )
+
+        qbit_category = meta.get('qbit_cat') or tracker_cfg.get('qbit_cat') or tracker_cfg.get('qbit_category') or generic_category
+        if qbit_category and torrent_client == "qbit":
+            overrides['qbit_cat'] = qbit_category
+
+        qbit_tag = meta.get('qbit_tag') or tracker_cfg.get('qbit_tag')
+        if qbit_tag and torrent_client == "qbit":
+            overrides['qbit_tag'] = qbit_tag
+
+        generic_label = meta.get('client_label') or tracker_cfg.get('client_label') or tracker_cfg.get('torrent_client_label') or generic_category
+
+        rtorrent_label = meta.get('rtorrent_label') or tracker_cfg.get('rtorrent_label') or generic_label
+        if rtorrent_label and torrent_client.lower() == "rtorrent":
+            overrides['rtorrent_label'] = rtorrent_label
+
+        transmission_label = meta.get('transmission_label') or tracker_cfg.get('transmission_label') or generic_label
+        if transmission_label and torrent_client.lower() == "transmission":
+            overrides['transmission_label'] = transmission_label
+
+        if not overrides:
+            return meta
+
+        client_meta = dict(meta)
+        client_meta.update(overrides)
+        if meta.get('debug'):
+            formatted = ", ".join(f"{key}={value}" for key, value in overrides.items())
+            console.print(f"[cyan]{tracker}: Applying tracker-specific client override: {formatted}[/cyan]")
+        return client_meta
 
     async def inject_delay(self, meta: dict[str, Any], tracker: str, client_name: str) -> None:
         """
