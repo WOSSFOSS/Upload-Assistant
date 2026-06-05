@@ -22,8 +22,8 @@ IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
 LOG_EXTENSIONS = {".cue", ".log", ".m3u", ".m3u8", ".nfo", ".txt"}
 LOSSLESS_TYPES = {"ALAC", "DFF", "DSD", "DSF", "FLAC", "PCM", "WAV", "WMA LOSSLESS"}
 MUSIC_LINK_ICONS = {
-    "MusicBrainz": "https://upload.wikimedia.org/wikipedia/commons/f/f2/MusicBrainz_Logo_Mini_%282016%29.svg",
-    "Discogs": "https://www.discogs.com/favicon.ico",
+    "MusicBrainz": "https://www.google.com/s2/favicons?domain=musicbrainz.org&sz=32",
+    "Discogs": "https://www.google.com/s2/favicons?domain=discogs.com&sz=32",
     "Deezer": "https://www.google.com/s2/favicons?domain=deezer.com&sz=32",
 }
 
@@ -641,7 +641,7 @@ class MusicProcessor:
             ("Year", meta.get("year")),
             ("Release date", meta.get("release_date")),
             ("Label", meta.get("label")),
-            ("Catalog number", meta.get("catalog_number")),
+            ("Catalog #", meta.get("catalog_number")),
             ("Barcode", meta.get("barcode")),
         ]
         return [f"{label}: {value}" for label, value in info if _mi_value(value)]
