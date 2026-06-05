@@ -298,14 +298,112 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
         console.print("[bold yellow]No Valid .torrent found")
         return None
 
+    @staticmethod
+    def _coerce_path_list(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if value:
+            return [str(value).strip()]
+        return []
+
+    @staticmethod
+    def _torrent_hash_from_file(torrent: Torrent, torrent_file_path: str) -> str:
+        hash_value = str(getattr(torrent, 'infohash', '') or getattr(torrent, 'infohash_v1', '') or '')
+        if hash_value:
+            return hash_value.lower()
+        return os.path.splitext(os.path.basename(torrent_file_path))[0].lower()
+
+    def _torrent_matches_meta_files(self, torrent: Torrent, meta: dict[str, Any]) -> bool:
+        filelist_value = meta.get('filelist') or []
+        filelist = [str(path) for path in filelist_value if path] if isinstance(filelist_value, list) else []
+        meta_path = str(meta.get('path', '') or '')
+
+        if (meta.get('is_disc') and meta.get('is_disc') != '') or (meta.get('keep_folder', False) and meta.get('isdir', False)):
+            torrent_name = str(torrent.metainfo.get('info', {}).get('name', '') or '')
+            return bool(torrent_name and os.path.basename(meta_path).lower() == torrent_name.lower())
+
+        if len(torrent.files) == len(filelist) == 1:
+            return os.path.basename(str(torrent.files[0])).lower() == os.path.basename(filelist[0]).lower()
+
+        if len(torrent.files) == len(filelist) and filelist:
+            torrent_basenames = sorted(os.path.basename(str(path)).lower() for path in torrent.files)
+            file_basenames = sorted(os.path.basename(str(path)).lower() for path in filelist)
+            return torrent_basenames == file_basenames
+
+        return False
+
+    async def _search_torrent_files_for_existing(
+        self,
+        meta: dict[str, Any],
+        client: dict[str, Any],
+        prefer_small_pieces: bool,
+        mtv_torrent: bool,
+        piece_limit: bool,
+    ) -> Union[dict[str, Any], str, None]:
+        torrent_dirs = self._coerce_path_list(client.get('torrent_search_dirs') or client.get('torrent_storage_dir'))
+        if not torrent_dirs:
+            console.print("[yellow]torrent_search_mode is 'files' but no torrent_search_dirs/torrent_storage_dir is configured[/yellow]")
+            return None
+
+        matches: list[dict[str, Any]] = []
+        scanned = 0
+        for torrent_dir in torrent_dirs:
+            if not os.path.isdir(torrent_dir):
+                console.print(f"[yellow]Torrent search directory not found: {torrent_dir}[/yellow]")
+                continue
+            for torrent_file_path in Path(torrent_dir).glob("*.torrent"):
+                scanned += 1
+                try:
+                    torrent = Torrent.read(str(torrent_file_path))
+                except Exception:
+                    continue
+                if not self._torrent_matches_meta_files(torrent, meta):
+                    continue
+
+                torrent_hash = self._torrent_hash_from_file(torrent, str(torrent_file_path))
+                valid, resolved_path = await self.is_valid_torrent(meta, str(torrent_file_path), torrent_hash, 'qbit', client)
+                if not valid:
+                    continue
+
+                matches.append({
+                    'torrenthash': torrent_hash,
+                    'torrent_path': resolved_path,
+                    'piece_size': torrent.piece_size,
+                })
+
+        if meta.get('debug'):
+            console.print(f"[cyan]Scanned {scanned} .torrent files for existing torrent reuse[/cyan]")
+
+        if not matches:
+            return None
+
+        if prefer_small_pieces or mtv_torrent or piece_limit:
+            if mtv_torrent:
+                preferred = [match for match in matches if int(match.get('piece_size') or 0) <= 8388608]
+            elif piece_limit:
+                preferred = [match for match in matches if int(match.get('piece_size') or 0) <= 16777216]
+            else:
+                preferred = matches
+            candidates = preferred or matches
+            best = min(candidates, key=lambda match: int(match.get('piece_size') or 0))
+            if preferred:
+                return str(best['torrent_path'])
+            return best
+
+        return str(matches[0]['torrent_path'])
+
     async def _search_single_client_for_torrent(self, meta: dict[str, Any], client_name: str, prefer_small_pieces: bool, mtv_torrent: bool, piece_limit: bool, best_match: Optional[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
         """Search a single client for an existing torrent by hash or via API search (qbit only)."""
 
         client = self.config['TORRENT_CLIENTS'][client_name]
         torrent_client = client.get('torrent_client', '').lower()
         torrent_storage_dir = client.get('torrent_storage_dir')
+        torrent_search_mode = str(client.get('torrent_search_mode', 'api')).strip().lower()
         qbt_client: Optional[qbittorrentapi.Client] = None
         proxy_url: Optional[str] = None
+
+        if torrent_client == 'qbit' and torrent_search_mode == 'files':
+            return await self._search_torrent_files_for_existing(meta, client, prefer_small_pieces, mtv_torrent, piece_limit)
 
         # Iterate through pre-specified hashes
         for hash_key in ['torrenthash', 'ext_torrenthash']:

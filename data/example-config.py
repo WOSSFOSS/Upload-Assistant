@@ -981,6 +981,18 @@ config = {
             "qui_proxy_url": "",
             # enable_search to True will automatically try and find a suitable hash to save having to rehash when creating torrents
             "enable_search": True,
+            # Search mode for existing torrents:
+            # "api" searches qBittorrent via WebUI API and exports matching torrents as needed.
+            # "files" scans local .torrent files directly, useful for large qBittorrent clients.
+            "torrent_search_mode": "api",
+            # Set this for "files" search mode
+            # Folder or list of folders containing .torrent files for torrent_search_mode "files".
+            # For qBittorrent this can be the BT_backup folder.
+            # "torrent_search_dirs": ["path/to/BT_backup folder"],
+            # Optionally set this for "api" search mode, otherwise torrent file will be exported from qBitTorrent when needed, which may cause issues if API searching does not work or if the torrent needs to be rehashed due to piece size change.
+            # only set qBitTorrent torrent_storage_dir if API searching does not work
+            # use double-backslash on windows eg: "C:\\client\\backup"
+            # "torrent_storage_dir": "path/to/BT_backup folder",
             "qbit_url": "http://127.0.0.1",
             "qbit_port": "8080",
             "qbit_user": "",
@@ -1015,9 +1027,6 @@ config = {
             # Remote path mapping (docker/etc.) CASE SENSITIVE
             "local_path": [""],
             "remote_path": [""],
-            # only set qBitTorrent torrent_storage_dir if API searching does not work
-            # use double-backslash on windows eg: "C:\\client\\backup"
-            # "torrent_storage_dir": "path/to/BT_backup folder",
 
             # Set to False to skip verify certificate for HTTPS connections; for instance, if the connection is using a self-signed certificate.
             # "VERIFY_WEBUI_CERTIFICATE": True,
@@ -1031,6 +1040,8 @@ config = {
             "qui_proxy_url": "",
             # enable_search to True will automatically try and find a suitable hash to save having to rehash when creating torrents
             "enable_search": True,
+            "torrent_search_mode": "api",
+            # "torrent_search_dirs": ["path/to/BT_backup folder"],
             "qbit_url": "http://127.0.0.1",
             "qbit_port": "8080",
             "qbit_user": "",

@@ -521,6 +521,14 @@ def _validate_torrent_clients_section(clients: dict[str, Any]) -> tuple[list[str
                 section="TORRENT_CLIENTS"
             ))
 
+        torrent_search_mode = client_config_dict.get("torrent_search_mode")
+        if torrent_search_mode and str(torrent_search_mode).lower() not in ("api", "files"):
+            warnings.append(ConfigValidationWarning(
+                f"Invalid torrent_search_mode '{torrent_search_mode}'. Use 'api' or 'files'",
+                key=client_name,
+                section="TORRENT_CLIENTS"
+            ))
+
         # Validate linking option
         linking = client_config_dict.get("linking", "")
         if linking and linking not in ("symlink", "hardlink", ""):

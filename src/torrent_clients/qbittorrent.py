@@ -1072,7 +1072,10 @@ class QbittorrentClientMixin:
                 if meta['debug']:
                     console.print(f"[cyan]Searching qBittorrent client: {client_name}")
 
-                torrents = await self._search_single_qbit_client(client_config, content_path, meta, client_name)
+                if str(client_config.get('torrent_search_mode', 'api')).strip().lower() == 'files':
+                    torrents = await self._search_single_qbit_files(client_config, meta, client_name)
+                else:
+                    torrents = await self._search_single_qbit_client(client_config, content_path, meta, client_name)
 
                 if torrents:
                     # Found matching torrents in this client
@@ -1118,6 +1121,105 @@ class QbittorrentClientMixin:
             if meta['debug']:
                 console.print(traceback.format_exc())
             return []
+
+    @staticmethod
+    def _coerce_path_list(value: Any) -> list[str]:
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        if value:
+            return [str(value).strip()]
+        return []
+
+    @staticmethod
+    def _torrent_hash_from_file(torrent: Torrent, torrent_file_path: str) -> str:
+        hash_value = str(getattr(torrent, 'infohash', '') or getattr(torrent, 'infohash_v1', '') or '')
+        if hash_value:
+            return hash_value.lower()
+        return os.path.splitext(os.path.basename(torrent_file_path))[0].lower()
+
+    def _torrent_file_matches_meta(self, torrent: Torrent, meta: dict[str, Any]) -> bool:
+        filelist_value = meta.get('filelist') or []
+        filelist = [str(path) for path in filelist_value if path] if isinstance(filelist_value, list) else []
+        meta_path = str(meta.get('path', '') or '')
+
+        if (meta.get('is_disc') and meta.get('is_disc') != '') or (meta.get('keep_folder', False) and meta.get('isdir', False)):
+            torrent_name = str(torrent.metainfo.get('info', {}).get('name', '') or '')
+            return bool(torrent_name and os.path.basename(meta_path).lower() == torrent_name.lower())
+
+        if len(torrent.files) == len(filelist) == 1:
+            return os.path.basename(str(torrent.files[0])).lower() == os.path.basename(filelist[0]).lower()
+
+        if len(torrent.files) == len(filelist) and filelist:
+            torrent_basenames = sorted(os.path.basename(str(path)).lower() for path in torrent.files)
+            file_basenames = sorted(os.path.basename(str(path)).lower() for path in filelist)
+            return torrent_basenames == file_basenames
+
+        return False
+
+    async def _search_single_qbit_files(self, client_config: dict[str, Any], meta: dict[str, Any], client_name: str) -> list[dict[str, Any]]:
+        torrent_dirs = self._coerce_path_list(client_config.get('torrent_search_dirs') or client_config.get('torrent_storage_dir'))
+        if not torrent_dirs:
+            console.print(f"[yellow]{client_name}: torrent_search_mode is 'files' but no torrent_search_dirs/torrent_storage_dir is configured[/yellow]")
+            return []
+
+        matches: list[dict[str, Any]] = []
+        scanned = 0
+        for torrent_dir in torrent_dirs:
+            if not os.path.isdir(torrent_dir):
+                console.print(f"[yellow]Torrent search directory not found: {torrent_dir}[/yellow]")
+                continue
+            for torrent_file_path in Path(torrent_dir).glob("*.torrent"):
+                scanned += 1
+                try:
+                    torrent = Torrent.read(str(torrent_file_path))
+                except Exception:
+                    continue
+                if not self._torrent_file_matches_meta(torrent, meta):
+                    continue
+
+                torrent_hash = self._torrent_hash_from_file(torrent, str(torrent_file_path))
+                metainfo_raw = getattr(torrent, 'metainfo', {})
+                metainfo = cast(dict[str, Any], metainfo_raw) if isinstance(metainfo_raw, dict) else {}
+                comment = str(metainfo.get('comment.utf-8') or metainfo.get('comment') or '')
+                tracker_urls = []
+                announce = metainfo.get('announce')
+                if announce:
+                    tracker_urls.append(str(announce))
+
+                match_info: dict[str, Any] = {
+                    'hash': torrent_hash,
+                    'name': str(torrent.name or metainfo.get('info', {}).get('name', '') or ''),
+                    'save_path': '',
+                    'content_path': '',
+                    'size': torrent.size,
+                    'category': '',
+                    'seeders': 0,
+                    'trackers': ','.join(tracker_urls),
+                    'has_working_tracker': True,
+                    'comment': comment,
+                    'tracker_urls': [],
+                    'has_tracker': False,
+                    'torrent_path': str(torrent_file_path),
+                }
+
+                tracker_ids = self._extract_tracker_ids_from_comment(comment)
+                if tracker_ids:
+                    match_info['has_tracker'] = True
+                    match_info['tracker_urls'] = [{'id': key, 'tracker_id': value} for key, value in tracker_ids.items()]
+                    meta.update(tracker_ids)
+
+                meta['infohash'] = torrent_hash
+                if not meta.get('base_torrent_created'):
+                    valid, resolved_path = await self.is_valid_torrent(meta, str(torrent_file_path), torrent_hash, 'qbit', client_config)
+                    if valid:
+                        await TorrentCreator.create_base_from_existing_torrent(resolved_path, meta['base_dir'], meta['uuid'])
+                        meta['base_torrent_created'] = True
+
+                matches.append(match_info)
+
+        if meta.get('debug'):
+            console.print(f"[cyan]Scanned {scanned} .torrent files for qBittorrent file search[/cyan]")
+        return matches
 
     def _build_proxy_search_url(self, qbt_proxy_url: str, search_term: str, qui_filters: dict[str, list[str]]) -> str:
         query_parts = [
