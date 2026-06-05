@@ -42,6 +42,7 @@ from src.languages import languages_manager
 from src.nfo_link import NfoLinkManager
 from src.qbitwait import Wait
 from src.queuemanage import QueueManager
+from src.search import SearchRunner
 from src.takescreens import TakeScreensManager
 from src.torrentcreate import TorrentCreator
 from src.trackerhandle import process_trackers
@@ -1553,6 +1554,12 @@ async def do_the_thing(base_dir: str) -> None:
                     console.print(f"[yellow]  ⚠ {warning_str}[/yellow]")
                 console.print()  # Blank line after warnings
 
+        if meta.get('search'):
+            await SearchRunner(config, base_dir, debug=bool(meta.get('debug'))).run(
+                str(meta.get('search_profile') or '').strip() or None
+            )
+            return
+
         if meta.get('cleanup'):
             if os.path.exists(f"{base_dir}/tmp"):
                 shutil.rmtree(f"{base_dir}/tmp")
@@ -1560,6 +1567,10 @@ async def do_the_thing(base_dir: str) -> None:
                 console.print()
             if not meta.get('path') or cleanup_only:
                 exit(0)
+
+        search_config = config.get('SEARCH', {})
+        if isinstance(search_config, dict) and search_config.get('queue_dir'):
+            meta['queue_dir'] = str(search_config['queue_dir'])
 
         if not meta.get('path'):
             exit(0)

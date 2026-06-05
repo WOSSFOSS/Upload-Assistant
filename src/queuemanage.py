@@ -37,6 +37,26 @@ async def _read_text_lines(path: str) -> list[str]:
 
 class QueueManager:
     @staticmethod
+    def _resolve_queue_dir(base_dir: str, meta: Optional[Mapping[str, Any]] = None, queue_dir: Optional[str] = None) -> str:
+        configured = queue_dir or (str(meta.get('queue_dir')) if meta and meta.get('queue_dir') else "")
+        if configured:
+            configured_path = Path(configured).expanduser()
+            if not configured_path.is_absolute():
+                configured_path = Path(base_dir) / configured_path
+            return os.fspath(configured_path)
+        return os.path.join(base_dir, "tmp")
+
+    @staticmethod
+    def _queue_log_file(base_dir: str, queue_name: str, meta: Optional[Mapping[str, Any]] = None) -> str:
+        safe_queue_name = queue_name.replace(" ", "_")
+        preferred_dir = QueueManager._resolve_queue_dir(base_dir, meta)
+        preferred = os.path.join(preferred_dir, f"{safe_queue_name}_queue.log")
+        legacy = os.path.join(base_dir, "tmp", f"{safe_queue_name}_queue.log")
+        if preferred != legacy and not os.path.exists(preferred) and os.path.exists(legacy):
+            return legacy
+        return preferred
+
+    @staticmethod
     async def process_site_upload_queue(meta: Mapping[str, Any], base_dir: str) -> tuple[list[QueueItem], Optional[str]]:
         site_upload = meta.get('site_upload')
         if not site_upload:
@@ -129,12 +149,13 @@ class QueueManager:
             console.print(f"[red]Error saving processed path: {e}[/red]")
 
     @staticmethod
-    async def get_log_file(base_dir: str, queue_name: str) -> str:
+    async def get_log_file(base_dir: str, queue_name: str, queue_dir: Optional[str] = None) -> str:
         """
         Returns the path to the log file for the given base directory and queue name.
         """
         safe_queue_name = queue_name.replace(" ", "_")
-        return os.path.join(base_dir, "tmp", f"{safe_queue_name}_processed_files.log")
+        resolved_queue_dir = QueueManager._resolve_queue_dir(base_dir, queue_dir=queue_dir)
+        return os.path.join(resolved_queue_dir, f"{safe_queue_name}_processed_files.log")
 
     @staticmethod
     async def load_processed_files(log_file: str) -> set[str]:
@@ -356,24 +377,25 @@ class QueueManager:
         base_dir: Optional[str] = None,
         queue_name: Optional[str] = None,
         save_to_log: bool = True,
+        queue_dir: Optional[str] = None,
     ) -> None:
-        """Displays the queued files in markdown format and optionally saves them to a log file in the tmp directory."""
+        """Displays the queued files in markdown format and optionally saves them to a queue log file."""
         md_text = "\n - ".join(queue)
         console.print("\n[bold green]Queuing these files:[/bold green]", end='')
         console.print(Markdown(f"- {md_text.rstrip()}\n\n", style=Style(color='cyan')))
         console.print("\n\n")
 
         if save_to_log and base_dir and queue_name:
-            tmp_dir = os.path.join(base_dir, "tmp")
-            if not os.path.exists(tmp_dir):
-                os.makedirs(tmp_dir, mode=0o700, exist_ok=True)
+            resolved_queue_dir = QueueManager._resolve_queue_dir(base_dir, queue_dir=queue_dir)
+            if not os.path.exists(resolved_queue_dir):
+                os.makedirs(resolved_queue_dir, mode=0o700, exist_ok=True)
                 # Enforce 0700 regardless of process umask (POSIX only).
                 if os.name != 'nt':
-                    os.chmod(tmp_dir, 0o700)
+                    os.chmod(resolved_queue_dir, 0o700)
             else:
                 if os.name != 'nt':
-                    os.chmod(tmp_dir, 0o700)
-            log_file = os.path.join(tmp_dir, f"{queue_name}_queue.log")
+                    os.chmod(resolved_queue_dir, 0o700)
+            log_file = os.path.join(resolved_queue_dir, f"{queue_name}_queue.log")
 
             try:
                 await _write_json_file(log_file, list(queue), indent=4)
@@ -405,7 +427,9 @@ class QueueManager:
                 console.print(f"[yellow]No unprocessed items found for {meta['site_upload']} upload[/yellow]")
                 return [], None
 
-        log_file = os.path.join(base_dir, "tmp", f"{meta.get('queue', 'default')}_queue.log")
+        queue_dir = QueueManager._resolve_queue_dir(base_dir, meta)
+        os.makedirs(queue_dir, exist_ok=True)
+        log_file = QueueManager._queue_log_file(base_dir, str(meta.get('queue', 'default')), meta)
 
         if path.endswith('.txt') and meta.get('unit3d'):
             console.print(f"[bold yellow]Detected a text file for queue input: {path}[/bold yellow]")
@@ -447,14 +471,16 @@ class QueueManager:
 
                 if os.path.exists(path):
                     current_files = await QueueManager.gather_files_recursive(path, allowed_extensions=allowed_extensions)
-                else:
+                elif path and os.path.basename(path) != 'dummy_path_for_site_upload':
                     current_files = await QueueManager.resolve_queue_with_glob_or_split(path, paths, allowed_extensions=allowed_extensions)
+                else:
+                    current_files = existing_queue
 
                 existing_set = set(existing_queue)
                 current_set = set(current_files)
                 new_files = current_set - existing_set
                 removed_files = existing_set - current_set
-                log_file_proccess = await QueueManager.get_log_file(base_dir, meta['queue'])
+                log_file_proccess = await QueueManager.get_log_file(base_dir, meta['queue'], queue_dir=queue_dir)
                 processed_files = await QueueManager.load_processed_files(log_file_proccess)
                 queued = [file for file in existing_queue if file not in processed_files]
 
@@ -624,14 +650,14 @@ class QueueManager:
 
         if meta.get('queue'):
             queue_name = meta['queue']
-            log_file = await QueueManager.get_log_file(base_dir, meta['queue'])
+            log_file = await QueueManager.get_log_file(base_dir, meta['queue'], queue_dir=queue_dir)
             processed_files = await QueueManager.load_processed_files(log_file)
             queue = [file for file in queue if file not in processed_files]
             if not queue:
                 console.print(f"[bold yellow]All files in the {meta['queue']} queue have already been processed.")
                 exit(0)
             if meta['debug']:
-                await QueueManager.display_queue(queue, base_dir, queue_name, save_to_log=False)
+                await QueueManager.display_queue(queue, base_dir, queue_name, save_to_log=False, queue_dir=queue_dir)
 
         return queue, log_file
 
@@ -648,8 +674,8 @@ async def save_processed_path(processed_files_log: str, path: str) -> None:
     await QueueManager.save_processed_path(processed_files_log, path)
 
 
-async def get_log_file(base_dir: str, queue_name: str) -> str:
-    return await QueueManager.get_log_file(base_dir, queue_name)
+async def get_log_file(base_dir: str, queue_name: str, queue_dir: Optional[str] = None) -> str:
+    return await QueueManager.get_log_file(base_dir, queue_name, queue_dir=queue_dir)
 
 
 async def load_processed_files(log_file: str) -> set[str]:

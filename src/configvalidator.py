@@ -8,7 +8,7 @@ from typing import Any, Optional, cast
 REQUIRED_SECTIONS = ["DEFAULT", "TRACKERS"]
 
 # Optional top-level sections
-OPTIONAL_SECTIONS = ["IMAGES", "TORRENT_CLIENTS", "DISCORD"]
+OPTIONAL_SECTIONS = ["IMAGES", "TORRENT_CLIENTS", "DISCORD", "SEARCH"]
 
 # Required keys in DEFAULT section (critical for operation)
 REQUIRED_DEFAULT_KEYS: dict[str, type] = {
@@ -215,6 +215,12 @@ def validate_config(
         discord_errors, discord_warnings = _validate_discord_section(_as_dict(config_dict.get("DISCORD")))
         errors.extend(discord_errors)
         warnings.extend(discord_warnings)
+
+    # Validate SEARCH section if present
+    if "SEARCH" in config_dict:
+        search_errors, search_warnings = _validate_search_section(_as_dict(config_dict.get("SEARCH")))
+        errors.extend(search_errors)
+        warnings.extend(search_warnings)
 
     # Cross-reference validation for torrent client configuration
     default_section = _as_dict(config_dict.get("DEFAULT"))
@@ -581,6 +587,66 @@ def _validate_discord_section(discord: dict[str, Any]) -> tuple[list[str], list[
                 key="discord_channel_id",
                 section="DISCORD"
             ))
+
+    return errors, warnings
+
+
+def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[ConfigValidationWarning]]:
+    """Validate the SEARCH config section."""
+    errors: list[str] = []
+    warnings: list[ConfigValidationWarning] = []
+
+    for key in ("queue_dir", "cache_dir"):
+        value = search.get(key)
+        if value is not None and not isinstance(value, str):
+            warnings.append(ConfigValidationWarning(
+                f"'{key}' should be a string path",
+                key=key,
+                section="SEARCH"
+            ))
+
+    libraries = search.get("libraries", {})
+    if libraries is not None and not isinstance(libraries, dict):
+        warnings.append(ConfigValidationWarning(
+            "'libraries' should be a dictionary",
+            key="libraries",
+            section="SEARCH"
+        ))
+
+    profiles = search.get("profiles", {})
+    if profiles is not None and not isinstance(profiles, dict):
+        warnings.append(ConfigValidationWarning(
+            "'profiles' should be a dictionary",
+            key="profiles",
+            section="SEARCH"
+        ))
+        return errors, warnings
+
+    if isinstance(profiles, dict):
+        for profile_name, profile in profiles.items():
+            if not isinstance(profile, dict):
+                warnings.append(ConfigValidationWarning(
+                    f"Profile '{profile_name}' should be a dictionary",
+                    key=str(profile_name),
+                    section="SEARCH"
+                ))
+                continue
+            targets = profile.get("targets", {})
+            if targets is not None and not isinstance(targets, dict):
+                warnings.append(ConfigValidationWarning(
+                    f"Profile '{profile_name}' targets should be a dictionary",
+                    key=str(profile_name),
+                    section="SEARCH"
+                ))
+                continue
+            if isinstance(targets, dict):
+                for tracker, target in targets.items():
+                    if not isinstance(target, dict):
+                        warnings.append(ConfigValidationWarning(
+                            f"Target '{tracker}' in profile '{profile_name}' should be a dictionary",
+                            key=str(tracker),
+                            section="SEARCH"
+                        ))
 
     return errors, warnings
 

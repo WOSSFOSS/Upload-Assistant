@@ -83,6 +83,8 @@ class Args:
 
         parser.add_argument('path', nargs='*', help="Path to file/directory (in single/double quotes is best)")
         parser.add_argument('--queue', nargs=1, required=False, help="(--queue queue_name) Process an entire folder (files/subfolders) in a queue")
+        parser.add_argument('--search', action='store_true', required=False, help="Run configured SEARCH profiles and create UA queue files")
+        parser.add_argument('--search-profile', dest='search_profile', nargs=1, required=False, help="Run one configured SEARCH profile")
         parser.add_argument('-lq', '--limit-queue', dest='limit_queue', nargs=1, required=False, help="Limit the amount of queue files processed", type=int, default=0)
         parser.add_argument('-sc', '--site-check', dest='site_check', action='store_true', required=False, help="Just search sites for suitable uploads and create log file, no uploading", default=False)
         parser.add_argument('-su', '--site-upload', dest='site_upload', nargs=1, required=False, help="Specify a single tracker, and it will process the site searches and upload.", type=str, default=None)
@@ -221,14 +223,17 @@ class Args:
         parsed_args: dict[str, Any] = vars(parsed_args_ns)
         # console.print(args)
 
-        # Validation: require either path, site_upload, or webui
-        if not parsed_args.get('path') and not parsed_args.get('site_upload') and not parsed_args.get('webui'):
-            console.print("[red]Error: Either a path must be provided, --site-upload must be specified, or --webui must be specified.[/red]")
+        if parsed_args.get('search_profile'):
+            parsed_args['search'] = True
+
+        # Validation: require either path, queue, site_upload, search, or webui
+        if not parsed_args.get('path') and not parsed_args.get('queue') and not parsed_args.get('site_upload') and not parsed_args.get('search') and not parsed_args.get('webui'):
+            console.print("[red]Error: Either a path must be provided, --queue, --site-upload, --search, or --webui must be specified.[/red]")
             parser.print_help()
             sys.exit(1)
 
         # For site upload mode, provide a dummy path if none given
-        if (parsed_args.get('site_upload') or parsed_args.get('webui')) and not parsed_args.get('path'):
+        if (parsed_args.get('queue') or parsed_args.get('site_upload') or parsed_args.get('search') or parsed_args.get('webui')) and not parsed_args.get('path'):
             parsed_args['path'] = ['dummy_path_for_site_upload']
 
         # manual_frames parsing happens after parsed_args are merged into meta

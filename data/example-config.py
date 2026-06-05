@@ -1000,6 +1000,7 @@ config = {
                         "source_libraries": ["gpw_movies", "mtv_movies"],
                         "source_paths": [],
                         "queue_name": "search_bhd_movies",
+                        # Optional: hardlink, symlink, copy, or empty to queue original files.
                         "linking": "",
                         "link_destination": "",
                     },
@@ -1008,6 +1009,7 @@ config = {
                         "source_libraries": ["bhd_movies", "mtv_movies"],
                         "source_paths": [],
                         "queue_name": "search_gpw_movies",
+                        # Optional: hardlink, symlink, copy, or empty to queue original files.
                         "linking": "",
                         "link_destination": "",
                     },
@@ -1020,6 +1022,7 @@ config = {
                         "source_libraries": [],
                         "source_paths": [],
                         "queue_name": "search_znth_music",
+                        # Optional: hardlink, symlink, copy, or empty to queue original files.
                         "linking": "",
                         "link_destination": "",
                     },
