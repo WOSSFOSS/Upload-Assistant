@@ -149,6 +149,30 @@ class UploadHelper:
         return not has_english_audio and not has_english_subtitle
 
     @staticmethod
+    def _needs_low_res_h265_warning(meta: Meta) -> bool:
+        resolution_match = re.search(r'\b(\d{3,4})[pi]\b', str(meta.get('resolution', '')), flags=re.IGNORECASE)
+        if not resolution_match or int(resolution_match.group(1)) > 1080:
+            return False
+
+        codec_parts = [
+            meta.get('video_codec'),
+            meta.get('video_encode'),
+            meta.get('name'),
+            meta.get('uuid'),
+        ]
+        video_tracks = [track for track in UploadHelper._get_mediainfo_tracks(meta) if track.get('@type') == 'Video']
+        if video_tracks:
+            video_track = video_tracks[0]
+            codec_parts.extend([
+                video_track.get('Format'),
+                video_track.get('Format_Commercial_IfAny'),
+                video_track.get('CodecID'),
+            ])
+
+        codec_text = " ".join(str(part) for part in codec_parts if part not in (None, "", {})).lower()
+        return bool(re.search(r'\b(?:x265|h[ ._-]?265|hevc)\b', codec_text))
+
+    @staticmethod
     def _format_confirm_media_lines(meta: Meta) -> list[str]:
         tracks = UploadHelper._get_mediainfo_tracks(meta)
         if not tracks:
@@ -638,6 +662,8 @@ class UploadHelper:
                     console.print(media_line)
                 if self._needs_missing_english_sub_warning(meta):
                     console.print("[bold red]Warning: No English audio and no English subtitles found. This may be forbidden on some trackers.[/bold red]")
+                if self._needs_low_res_h265_warning(meta):
+                    console.print("[bold red]Warning: 1080p or lower x265/H.265/HEVC encodes may be forbidden on some trackers.[/bold red]")
                 console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
                 confirm = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N[/yellow]: ").strip().lower() == 'y'
             elif not meta.get('emby_debug', False):
