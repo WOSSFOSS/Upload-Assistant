@@ -602,6 +602,11 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
             cleanup_manager.reset_terminal()
             sys.exit(1)
 
+    if confirm == "skip":
+        console.print("[yellow]Skipping this upload by user request.[/yellow]")
+        meta['we_are_uploading'] = False
+        return
+
     if meta.get('emby', False):
         if not meta['debug']:
             await nfo_link_manager.nfo_link(meta)
@@ -630,6 +635,9 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
         meta['skip_uploading'] = 10
 
     else:
+        if not await ensure_base_torrent_for_upload(meta, config, client):
+            return
+
         console.print(f"[green]Processing {meta['name']} for upload...[/green]")
 
         # reset trackers after any removals
@@ -1129,58 +1137,8 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
             with contextlib.suppress(asyncio.CancelledError):
                 await progress_task
 
-        torrent_path = os.path.abspath(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent")
-        if meta.get('force_recheck', False):
-            waiter = Wait(config)
-            await waiter.select_and_recheck_best_torrent(meta, meta['path'], check_interval=5)
-        if not os.path.exists(torrent_path):
-            reuse_torrent = None
-            if meta.get('rehash', False) is False and not meta['base_torrent_created'] and not meta['we_checked_them_all']:
-                reuse_torrent = await client.find_existing_torrent(meta)
-                if reuse_torrent is not None:
-                    await TorrentCreator.create_base_from_existing_torrent(reuse_torrent, meta['base_dir'], meta['uuid'])
-
-            if meta['nohash'] is False and reuse_torrent is None:
-                await TorrentCreator.create_torrent(meta, Path(meta['path']), "BASE")
-            if meta['nohash']:
-                meta['client'] = "none"
-
-        elif os.path.exists(torrent_path) and meta.get('rehash', False) is True and meta['nohash'] is False:
-            await TorrentCreator.create_torrent(meta, Path(meta['path']), "BASE")
-
-        if os.path.exists(torrent_path):
-            raw_trackers = meta.get('trackers')
-            if isinstance(raw_trackers, str):
-                trackers_list = [raw_trackers]
-            elif isinstance(raw_trackers, list):
-                trackers_list = [str(t) for t in cast(list[Any], raw_trackers) if str(t).strip()]
-            else:
-                trackers_list = []
-            trackers_upper = [str(t).strip().upper() for t in trackers_list if str(t).strip()]
-
-            base_piece_mb: Optional[int] = cast(Optional[int], meta.get('base_torrent_piece_mb'))
-            if base_piece_mb is None and any(t in {"HDB", "MTV", "PTP"} for t in trackers_upper):
-                try:
-                    torrent = await asyncio.to_thread(Torrent.read, torrent_path)
-                    base_piece_mb = int(torrent.piece_size // (1024 * 1024))
-                    meta['base_torrent_piece_mb'] = base_piece_mb
-                except Exception as e:
-                    if meta.get('debug', False):
-                        console.print(f"[yellow]Unable to cache BASE.torrent piece size: {e}")
-                    base_piece_mb = None
-
-            if "MTV" in trackers_upper:
-                mtv_cfg = config.get('TRACKERS', {}).get('MTV', {})
-                if str(mtv_cfg.get('skip_if_rehash', 'false')).lower() == 'true' and base_piece_mb and base_piece_mb > 8:
-                    meta['trackers'] = [t for t in trackers_list if str(t).strip().upper() != "MTV"]
-                    trackers_list = [str(t) for t in cast(list[Any], meta.get('trackers') or []) if str(t).strip()]
-                    trackers_upper = [str(t).strip().upper() for t in trackers_list if str(t).strip()]
-                    if meta.get('debug', False):
-                        console.print("[yellow]Removed MTV from trackers due to skip_if_rehash config and 8 MiB limit.[/yellow]")
-                    if not meta['trackers']:
-                        console.print("[red]No trackers remain after removing MTV for skip_if_rehash.[/red]")
-                        meta['we_are_uploading'] = False
-                        return
+        if not await ensure_base_torrent_for_upload(meta, config, client):
+            return
 
         if int(meta.get('randomized', 0)) >= 1 and not meta['mkbrr']:
             TorrentCreator.create_random_torrents(meta['base_dir'], meta['uuid'], meta['randomized'], meta['path'])
@@ -1314,6 +1272,82 @@ async def update_notification(base_dir: str) -> Optional[str]:
                 console.print("[yellow]Changelog not found between versions.[/yellow]")
 
     return local_version
+
+
+def _format_piece_size(piece_size: Any) -> str:
+    try:
+        piece_size_float = float(piece_size)
+    except (TypeError, ValueError):
+        return "unknown"
+    mib = piece_size_float / 1024 / 1024
+    if mib >= 1:
+        return f"{mib:.2f} MiB"
+    return f"{piece_size_float / 1024:.0f} KiB"
+
+
+async def ensure_base_torrent_for_upload(meta: Meta, config: dict[str, Any], client: Clients) -> bool:
+    torrent_path = os.path.abspath(f"{meta['base_dir']}/tmp/{meta['uuid']}/BASE.torrent")
+    if meta.get('force_recheck', False):
+        waiter = Wait(config)
+        await waiter.select_and_recheck_best_torrent(meta, meta['path'], check_interval=5)
+
+    if not os.path.exists(torrent_path):
+        reuse_torrent = None
+        if meta.get('rehash', False) is False and not meta.get('base_torrent_created', False) and not meta.get('we_checked_them_all', False):
+            reuse_torrent = await client.find_existing_torrent(meta)
+            if reuse_torrent is not None:
+                await TorrentCreator.create_base_from_existing_torrent(reuse_torrent, meta['base_dir'], meta['uuid'])
+
+        if meta['nohash'] is False and reuse_torrent is None:
+            await TorrentCreator.create_torrent(meta, Path(meta['path']), "BASE")
+        if meta['nohash']:
+            meta['client'] = "none"
+
+    elif os.path.exists(torrent_path) and meta.get('rehash', False) is True and meta['nohash'] is False:
+        await TorrentCreator.create_torrent(meta, Path(meta['path']), "BASE")
+
+    if os.path.exists(torrent_path):
+        raw_trackers = meta.get('trackers')
+        if isinstance(raw_trackers, str):
+            trackers_list = [raw_trackers]
+        elif isinstance(raw_trackers, list):
+            trackers_list = [str(t) for t in cast(list[Any], raw_trackers) if str(t).strip()]
+        else:
+            trackers_list = []
+        trackers_upper = [str(t).strip().upper() for t in trackers_list if str(t).strip()]
+
+        try:
+            torrent = await asyncio.to_thread(Torrent.read, torrent_path)
+            base_piece_mb = int(torrent.piece_size // (1024 * 1024))
+            meta['base_torrent_piece_mb'] = base_piece_mb
+            file_search_match = meta.pop('torrent_file_search_match', None)
+            if isinstance(file_search_match, dict):
+                torrent_hash = str(file_search_match.get('hash') or getattr(torrent, 'infohash', '') or getattr(torrent, 'infohash_v1', ''))
+                piece_size = file_search_match.get('piece_size') or torrent.piece_size
+                pieces = file_search_match.get('pieces') or torrent.pieces
+                console.print(
+                    f"[green]Found matching .torrent via file search[/green] - "
+                    f"[yellow]Piece size: {_format_piece_size(piece_size)}[/yellow] - "
+                    f"[yellow]Pieces: {pieces}[/yellow] - "
+                    f"[yellow]Hash: {torrent_hash}[/yellow]"
+                )
+        except Exception as e:
+            if meta.get('debug', False):
+                console.print(f"[yellow]Unable to cache BASE.torrent piece size: {e}")
+            base_piece_mb = None
+
+        if "MTV" in trackers_upper:
+            mtv_cfg = config.get('TRACKERS', {}).get('MTV', {})
+            if str(mtv_cfg.get('skip_if_rehash', 'false')).lower() == 'true' and base_piece_mb and base_piece_mb > 8:
+                meta['trackers'] = [t for t in trackers_list if str(t).strip().upper() != "MTV"]
+                if meta.get('debug', False):
+                    console.print("[yellow]Removed MTV from trackers due to skip_if_rehash config and 8 MiB limit.[/yellow]")
+                if not meta['trackers']:
+                    console.print("[red]No trackers remain after removing MTV for skip_if_rehash.[/red]")
+                    meta['we_are_uploading'] = False
+                    return False
+
+    return True
 
 
 async def do_the_thing(base_dir: str) -> None:

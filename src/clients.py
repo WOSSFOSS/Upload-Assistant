@@ -365,10 +365,16 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                 if not valid:
                     continue
 
+                meta['torrent_file_search_match'] = {
+                    'hash': torrent_hash,
+                    'piece_size': torrent.piece_size,
+                    'pieces': torrent.pieces,
+                }
                 matches.append({
                     'torrenthash': torrent_hash,
                     'torrent_path': resolved_path,
                     'piece_size': torrent.piece_size,
+                    'pieces': torrent.pieces,
                 })
                 if not (prefer_small_pieces or mtv_torrent or piece_limit):
                     if meta.get('debug'):
@@ -390,10 +396,20 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                 preferred = matches
             candidates = preferred or matches
             best = min(candidates, key=lambda match: int(match.get('piece_size') or 0))
+            meta['torrent_file_search_match'] = {
+                'hash': best.get('torrenthash'),
+                'piece_size': best.get('piece_size'),
+                'pieces': best.get('pieces'),
+            }
             if preferred:
                 return str(best['torrent_path'])
             return best
 
+        meta['torrent_file_search_match'] = {
+            'hash': matches[0].get('torrenthash'),
+            'piece_size': matches[0].get('piece_size'),
+            'pieces': matches[0].get('pieces'),
+        }
         return str(matches[0]['torrent_path'])
 
     async def _search_single_client_for_torrent(self, meta: dict[str, Any], client_name: str, prefer_small_pieces: bool, mtv_torrent: bool, piece_limit: bool, best_match: Optional[dict[str, Any]]) -> Union[dict[str, Any], str, None]:

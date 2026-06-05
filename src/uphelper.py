@@ -115,6 +115,47 @@ class UploadHelper:
         return f"{channel_count:g}ch"
 
     @staticmethod
+    def _duration_to_seconds(value: Any) -> Optional[int]:
+        value_text = UploadHelper._mi_value(value)
+        if not value_text:
+            return None
+
+        try:
+            duration = float(value_text)
+            # MediaInfo JSON often stores Duration in milliseconds; UA video_duration is seconds.
+            if duration > 10000:
+                duration = duration / 1000
+            return int(round(duration))
+        except ValueError:
+            pass
+
+        hours_match = re.search(r'(\d+)\s*h', value_text, flags=re.IGNORECASE)
+        minutes_match = re.search(r'(\d+)\s*min', value_text, flags=re.IGNORECASE)
+        seconds_match = re.search(r'(\d+)\s*s', value_text, flags=re.IGNORECASE)
+        if hours_match or minutes_match or seconds_match:
+            hours = int(hours_match.group(1)) if hours_match else 0
+            minutes = int(minutes_match.group(1)) if minutes_match else 0
+            seconds = int(seconds_match.group(1)) if seconds_match else 0
+            return hours * 3600 + minutes * 60 + seconds
+
+        colon_match = re.search(r'(?:(\d+):)?(\d{1,2}):(\d{2})', value_text)
+        if colon_match:
+            hours = int(colon_match.group(1) or 0)
+            minutes = int(colon_match.group(2))
+            seconds = int(colon_match.group(3))
+            return hours * 3600 + minutes * 60 + seconds
+
+        return None
+
+    @staticmethod
+    def _format_duration(value: Any) -> Optional[str]:
+        seconds_total = UploadHelper._duration_to_seconds(value)
+        if seconds_total is None:
+            return None
+        minutes, seconds = divmod(seconds_total, 60)
+        return f"{minutes}m {seconds:02d}s"
+
+    @staticmethod
     def _get_mediainfo_tracks(meta: Meta) -> list[dict[str, Any]]:
         mediainfo = cast(dict[str, Any], meta.get('mediainfo', {}))
         media = cast(dict[str, Any], mediainfo.get('media', {}))
@@ -182,6 +223,16 @@ class UploadHelper:
         video_tracks = [track for track in tracks if track.get('@type') == 'Video']
         audio_tracks = [track for track in tracks if track.get('@type') == 'Audio']
         subtitle_tracks = [track for track in tracks if track.get('@type') == 'Text']
+
+        duration = UploadHelper._format_duration(meta.get('video_duration'))
+        if duration is None:
+            general_tracks = [track for track in tracks if track.get('@type') == 'General']
+            if general_tracks:
+                duration = UploadHelper._format_duration(general_tracks[0].get('Duration'))
+        if duration is None and video_tracks:
+            duration = UploadHelper._format_duration(video_tracks[0].get('Duration'))
+        if duration:
+            lines.append(f"[bold]Duration:[/bold] {duration}")
 
         if video_tracks:
             video_bitrate = UploadHelper._format_bitrate(video_tracks[0].get('BitRate'))
@@ -574,8 +625,8 @@ class UploadHelper:
                 console.print("\n".join(results), soft_wrap=True)
                 console.print()
 
-    async def get_confirmation(self, meta: Meta) -> bool:
-        confirm: bool = False
+    async def get_confirmation(self, meta: Meta) -> Union[bool, str]:
+        confirm: Union[bool, str] = False
         if meta['debug'] is True:
             console.print("[bold red]DEBUG: True - Will not actually upload!")
             console.print(f"Prep material saved to {meta['base_dir']}/tmp/{meta['uuid']}")
@@ -669,9 +720,11 @@ class UploadHelper:
                 if self._needs_missing_english_sub_warning(meta):
                     console.print("[bold red]Warning: No English audio and no English subtitles found. This may be forbidden on some trackers.[/bold red]")
                 console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
-                confirm = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N[/yellow]: ").strip().lower() == 'y'
+                confirm_input = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N/skip[/yellow]: ").strip().lower()
+                confirm = "skip" if confirm_input in {"s", "skip"} else confirm_input == 'y'
             elif not meta.get('emby_debug', False):
-                confirm = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N[/yellow]: ").strip().lower() == 'y'
+                confirm_input = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N/skip[/yellow]: ").strip().lower()
+                confirm = "skip" if confirm_input in {"s", "skip"} else confirm_input == 'y'
         if meta.get('emby_debug', False):
             if meta.get('original_imdb', 0) != meta.get('imdb_id', 0):
                 imdb = str(meta.get('imdb_id', 0)).zfill(7)
