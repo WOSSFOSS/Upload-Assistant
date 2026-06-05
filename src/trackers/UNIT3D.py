@@ -230,6 +230,36 @@ class UNIT3D:
         return {"name": meta["name"]}
 
     async def get_description(self, meta: dict[str, Any]) -> dict[str, str]:
+        if meta.get("is_music"):
+            description_path = f"{meta['base_dir']}/tmp/{meta['uuid']}/DESCRIPTION.txt"
+            description = ""
+            if os.path.exists(description_path):
+                async with aiofiles.open(description_path, encoding="utf-8") as f:
+                    description = await f.read()
+
+            builder = DescriptionBuilder(self.tracker, self.config)
+            desc_parts = []
+            custom_header = await builder.get_custom_header()
+            if custom_header:
+                desc_parts.append(custom_header)
+            if description.strip():
+                desc_parts.append(description.strip())
+            custom_signature = await builder.get_custom_signature()
+            if custom_signature:
+                desc_parts.append(custom_signature)
+            desc_parts.append(
+                f"[right][url=https://github.com/fr1day13/Upload-Assistant][size=4]{meta['ua_signature']}[/size][/url][/right]"
+            )
+            description = "\n\n".join(part for part in desc_parts if str(part).strip())
+
+            if meta.get("debug"):
+                desc_file = f"{meta['base_dir']}/tmp/{meta['uuid']}/[{self.tracker}]DESCRIPTION.txt"
+                console.print(f"DEBUG: Saving final description to [yellow]{desc_file}[/yellow]")
+                async with aiofiles.open(desc_file, "w", encoding="utf-8") as description_file:
+                    await description_file.write(description)
+
+            return {"description": description}
+
         return {
             "description": await DescriptionBuilder(self.tracker, self.config).unit3d_edit_desc(
                 meta, comparison=True
