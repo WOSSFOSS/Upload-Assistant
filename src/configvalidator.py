@@ -528,6 +528,14 @@ def _validate_torrent_clients_section(clients: dict[str, Any]) -> tuple[list[str
                 section="TORRENT_CLIENTS"
             ))
 
+        torrent_file_index = client_config_dict.get("torrent_file_index")
+        if torrent_file_index and str(torrent_file_index).lower() not in ("off", "lazy", "full"):
+            warnings.append(ConfigValidationWarning(
+                f"Invalid torrent_file_index '{torrent_file_index}'. Use 'off', 'lazy', or 'full'",
+                key=client_name,
+                section="TORRENT_CLIENTS"
+            ))
+
         # Validate linking option
         linking = client_config_dict.get("linking", "")
         if linking and linking not in ("symlink", "hardlink", ""):

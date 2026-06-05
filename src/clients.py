@@ -1,7 +1,10 @@
 import asyncio
+import json
 import os
 import re
 import shutil
+import sqlite3
+import time
 import urllib.parse
 from pathlib import Path
 from typing import Any, Optional, Union, cast
@@ -354,6 +357,15 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
             return hash_value.lower()
         return os.path.splitext(os.path.basename(torrent_file_path))[0].lower()
 
+    @staticmethod
+    async def _read_torrent_file(torrent_file_path: str, timeout: float) -> Optional[Torrent]:
+        try:
+            return await asyncio.wait_for(asyncio.to_thread(Torrent.read, torrent_file_path), timeout=timeout)
+        except asyncio.TimeoutError:
+            return None
+        except Exception:
+            return None
+
     def _torrent_matches_meta_files(self, torrent: Torrent, meta: dict[str, Any]) -> bool:
         filelist_value = meta.get('filelist') or []
         filelist = [str(path) for path in filelist_value if path] if isinstance(filelist_value, list) else []
@@ -373,58 +385,143 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
 
         return False
 
-    async def _search_torrent_files_for_existing(
+    def _torrent_file_index_mode(self, client: dict[str, Any]) -> str:
+        raw_mode = client.get('torrent_file_index', self.config['DEFAULT'].get('torrent_file_index', 'off'))
+        if isinstance(raw_mode, bool):
+            return 'lazy' if raw_mode else 'off'
+        mode = str(raw_mode or 'off').strip().lower()
+        return mode if mode in {'off', 'lazy', 'full'} else 'off'
+
+    def _torrent_file_index_path(self, meta: dict[str, Any]) -> Path:
+        return Path(str(meta.get('base_dir') or '.')) / 'tmp' / 'torrent_file_index.sqlite'
+
+    def _torrent_file_index_connection(self, meta: dict[str, Any]) -> sqlite3.Connection:
+        db_path = self._torrent_file_index_path(meta)
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        conn = sqlite3.connect(db_path)
+        conn.row_factory = sqlite3.Row
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS torrent_file_index (
+                path TEXT PRIMARY KEY,
+                search_dir TEXT NOT NULL,
+                mtime_ns INTEGER NOT NULL,
+                file_size INTEGER NOT NULL,
+                infohash TEXT NOT NULL,
+                torrent_name TEXT NOT NULL,
+                file_count INTEGER NOT NULL,
+                total_size INTEGER NOT NULL,
+                file_basenames TEXT NOT NULL,
+                piece_size INTEGER NOT NULL,
+                pieces INTEGER NOT NULL
+            )
+        """)
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_torrent_file_index_match ON torrent_file_index(file_count, file_basenames)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_torrent_file_index_name ON torrent_file_index(torrent_name)")
+        return conn
+
+    @staticmethod
+    def _torrent_file_stat(path: str) -> Optional[os.stat_result]:
+        try:
+            return os.stat(path)
+        except OSError:
+            return None
+
+    @staticmethod
+    def _torrent_file_basenames(files: Any) -> list[str]:
+        return sorted(os.path.basename(str(path)).lower() for path in files or [])
+
+    def _meta_file_match_values(self, meta: dict[str, Any]) -> tuple[int, str, str]:
+        filelist_value = meta.get('filelist') or []
+        filelist = [str(path) for path in filelist_value if path] if isinstance(filelist_value, list) else []
+        file_basenames = self._torrent_file_basenames(filelist)
+        return len(file_basenames), json.dumps(file_basenames, separators=(',', ':')), os.path.basename(str(meta.get('path', '') or '')).lower()
+
+    def _torrent_index_row_matches_meta(self, row: sqlite3.Row, meta: dict[str, Any]) -> bool:
+        file_count, file_basenames_json, meta_basename = self._meta_file_match_values(meta)
+        if (meta.get('is_disc') and meta.get('is_disc') != '') or (meta.get('keep_folder', False) and meta.get('isdir', False)):
+            return bool(meta_basename and str(row['torrent_name']).lower() == meta_basename)
+        return int(row['file_count']) == file_count and str(row['file_basenames']) == file_basenames_json
+
+    def _torrent_index_row_is_current(self, row: sqlite3.Row) -> bool:
+        stat = self._torrent_file_stat(str(row['path']))
+        return bool(stat and int(row['mtime_ns']) == stat.st_mtime_ns and int(row['file_size']) == stat.st_size)
+
+    def _upsert_torrent_file_index(self, conn: sqlite3.Connection, torrent_file_path: str, search_dir: str, torrent: Torrent, torrent_hash: str) -> None:
+        stat = self._torrent_file_stat(torrent_file_path)
+        if stat is None:
+            return
+        metainfo_raw = getattr(torrent, 'metainfo', {})
+        metainfo = cast(dict[str, Any], metainfo_raw) if isinstance(metainfo_raw, dict) else {}
+        info = metainfo.get('info') if isinstance(metainfo.get('info'), dict) else {}
+        torrent_name = str(getattr(torrent, 'name', '') or info.get('name') or '')
+        file_basenames = json.dumps(self._torrent_file_basenames(torrent.files), separators=(',', ':'))
+        conn.execute(
+            """
+            INSERT INTO torrent_file_index (
+                path, search_dir, mtime_ns, file_size, infohash, torrent_name,
+                file_count, total_size, file_basenames, piece_size, pieces
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(path) DO UPDATE SET
+                search_dir=excluded.search_dir,
+                mtime_ns=excluded.mtime_ns,
+                file_size=excluded.file_size,
+                infohash=excluded.infohash,
+                torrent_name=excluded.torrent_name,
+                file_count=excluded.file_count,
+                total_size=excluded.total_size,
+                file_basenames=excluded.file_basenames,
+                piece_size=excluded.piece_size,
+                pieces=excluded.pieces
+            """,
+            (
+                torrent_file_path,
+                search_dir,
+                stat.st_mtime_ns,
+                stat.st_size,
+                torrent_hash,
+                torrent_name,
+                len(torrent.files),
+                int(getattr(torrent, 'size', 0) or 0),
+                file_basenames,
+                int(getattr(torrent, 'piece_size', 0) or 0),
+                int(getattr(torrent, 'pieces', 0) or 0),
+            ),
+        )
+
+    async def _valid_torrent_file_index_matches(
         self,
         meta: dict[str, Any],
         client: dict[str, Any],
+        conn: sqlite3.Connection,
+        torrent_dirs: list[str],
+    ) -> list[dict[str, Any]]:
+        matches: list[dict[str, Any]] = []
+        for torrent_dir in torrent_dirs:
+            rows = conn.execute("SELECT * FROM torrent_file_index WHERE search_dir = ?", (torrent_dir,)).fetchall()
+            for row in rows:
+                if not self._torrent_index_row_matches_meta(row, meta):
+                    continue
+                if not self._torrent_index_row_is_current(row):
+                    continue
+                valid, resolved_path = await self.is_valid_torrent(meta, str(row['path']), str(row['infohash']), 'qbit', client)
+                if not valid:
+                    continue
+                matches.append({
+                    'torrenthash': str(row['infohash']),
+                    'torrent_path': resolved_path,
+                    'piece_size': int(row['piece_size']),
+                    'pieces': int(row['pieces']),
+                })
+        return matches
+
+    def _select_torrent_file_match(
+        self,
+        meta: dict[str, Any],
+        matches: list[dict[str, Any]],
         prefer_small_pieces: bool,
         mtv_torrent: bool,
         piece_limit: bool,
     ) -> Union[dict[str, Any], str, None]:
-        torrent_dirs = self._coerce_path_list(client.get('torrent_search_dirs') or client.get('torrent_storage_dir'))
-        if not torrent_dirs:
-            console.print("[yellow]torrent_search_mode is 'files' but no torrent_search_dirs/torrent_storage_dir is configured[/yellow]")
-            return None
-
-        matches: list[dict[str, Any]] = []
-        scanned = 0
-        for torrent_dir in torrent_dirs:
-            if not os.path.isdir(torrent_dir):
-                console.print(f"[yellow]Torrent search directory not found: {torrent_dir}[/yellow]")
-                continue
-            for torrent_file_path in Path(torrent_dir).glob("*.torrent"):
-                scanned += 1
-                try:
-                    torrent = Torrent.read(str(torrent_file_path))
-                except Exception:
-                    continue
-                if not self._torrent_matches_meta_files(torrent, meta):
-                    continue
-
-                torrent_hash = self._torrent_hash_from_file(torrent, str(torrent_file_path))
-                valid, resolved_path = await self.is_valid_torrent(meta, str(torrent_file_path), torrent_hash, 'qbit', client)
-                if not valid:
-                    continue
-
-                meta['torrent_file_search_match'] = {
-                    'hash': torrent_hash,
-                    'piece_size': torrent.piece_size,
-                    'pieces': torrent.pieces,
-                }
-                matches.append({
-                    'torrenthash': torrent_hash,
-                    'torrent_path': resolved_path,
-                    'piece_size': torrent.piece_size,
-                    'pieces': torrent.pieces,
-                })
-                if not (prefer_small_pieces or mtv_torrent or piece_limit):
-                    if meta.get('debug'):
-                        console.print(f"[cyan]Scanned {scanned} .torrent files for existing torrent reuse[/cyan]")
-                    return str(resolved_path)
-
-        if meta.get('debug'):
-            console.print(f"[cyan]Scanned {scanned} .torrent files for existing torrent reuse[/cyan]")
-
         if not matches:
             return None
 
@@ -452,6 +549,127 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
             'pieces': matches[0].get('pieces'),
         }
         return str(matches[0]['torrent_path'])
+
+    async def _search_torrent_files_for_existing(
+        self,
+        meta: dict[str, Any],
+        client: dict[str, Any],
+        prefer_small_pieces: bool,
+        mtv_torrent: bool,
+        piece_limit: bool,
+    ) -> Union[dict[str, Any], str, None]:
+        torrent_dirs = self._coerce_path_list(client.get('torrent_search_dirs') or client.get('torrent_storage_dir'))
+        if not torrent_dirs:
+            console.print("[yellow]torrent_search_mode is 'files' but no torrent_search_dirs/torrent_storage_dir is configured[/yellow]")
+            return None
+
+        try:
+            read_timeout = float(client.get('torrent_file_read_timeout') or self.config['DEFAULT'].get('torrent_file_read_timeout', 3))
+        except (TypeError, ValueError):
+            read_timeout = 3.0
+        try:
+            progress_interval = int(client.get('torrent_file_search_progress_interval') or self.config['DEFAULT'].get('torrent_file_search_progress_interval', 500))
+        except (TypeError, ValueError):
+            progress_interval = 500
+        try:
+            max_scan = int(client.get('torrent_file_search_max_files') or self.config['DEFAULT'].get('torrent_file_search_max_files', 0))
+        except (TypeError, ValueError):
+            max_scan = 0
+        index_mode = self._torrent_file_index_mode(client)
+        index_conn: Optional[sqlite3.Connection] = None
+        indexed_paths: set[str] = set()
+        if index_mode != 'off':
+            index_conn = self._torrent_file_index_connection(meta)
+
+        if meta.get('debug'):
+            console.print(
+                f"[cyan]Searching .torrent files in {len(torrent_dirs)} director{'y' if len(torrent_dirs) == 1 else 'ies'} "
+                f"(read timeout: {read_timeout:g}s, max files: {max_scan or 'unlimited'}, index: {index_mode})[/cyan]"
+            )
+
+        try:
+            matches: list[dict[str, Any]] = []
+            if index_conn is not None:
+                indexed_rows = index_conn.execute("SELECT * FROM torrent_file_index").fetchall()
+                indexed_paths = {str(row['path']) for row in indexed_rows if self._torrent_index_row_is_current(row)}
+                index_matches = await self._valid_torrent_file_index_matches(meta, client, index_conn, torrent_dirs)
+                if index_matches:
+                    if meta.get('debug'):
+                        console.print(f"[cyan]Found {len(index_matches)} candidate(s) in torrent file index[/cyan]")
+                    if index_mode != 'full':
+                        result = self._select_torrent_file_match(meta, index_matches, prefer_small_pieces, mtv_torrent, piece_limit)
+                        if result is not None:
+                            return result
+                    matches.extend(index_matches)
+
+            scanned = 0
+            indexed = 0
+            skipped_indexed = 0
+            unreadable = 0
+            started = time.monotonic()
+            for torrent_dir in torrent_dirs:
+                if not os.path.isdir(torrent_dir):
+                    console.print(f"[yellow]Torrent search directory not found: {torrent_dir}[/yellow]")
+                    continue
+                for torrent_file_path in Path(torrent_dir).glob("*.torrent"):
+                    torrent_file_path_str = str(torrent_file_path)
+                    if index_conn is not None and index_mode == 'lazy' and torrent_file_path_str in indexed_paths:
+                        skipped_indexed += 1
+                        continue
+                    if max_scan > 0 and scanned >= max_scan:
+                        console.print(f"[yellow]Stopped .torrent file search after configured limit of {max_scan} files[/yellow]")
+                        break
+                    scanned += 1
+                    if meta.get('debug') and progress_interval > 0 and scanned % progress_interval == 0:
+                        elapsed = time.monotonic() - started
+                        console.print(f"[cyan]Scanned {scanned} .torrent files in {elapsed:.1f}s for existing torrent reuse[/cyan]")
+
+                    torrent = await self._read_torrent_file(torrent_file_path_str, read_timeout)
+                    if torrent is None:
+                        unreadable += 1
+                        continue
+
+                    torrent_hash = self._torrent_hash_from_file(torrent, torrent_file_path_str)
+                    if index_conn is not None:
+                        self._upsert_torrent_file_index(index_conn, torrent_file_path_str, torrent_dir, torrent, torrent_hash)
+                        indexed += 1
+                        indexed_paths.add(torrent_file_path_str)
+
+                    if not self._torrent_matches_meta_files(torrent, meta):
+                        continue
+
+                    valid, resolved_path = await self.is_valid_torrent(meta, torrent_file_path_str, torrent_hash, 'qbit', client)
+                    if not valid:
+                        continue
+
+                    matches.append({
+                        'torrenthash': torrent_hash,
+                        'torrent_path': resolved_path,
+                        'piece_size': torrent.piece_size,
+                        'pieces': torrent.pieces,
+                    })
+                    if not (prefer_small_pieces or mtv_torrent or piece_limit) and index_mode != 'full':
+                        if meta.get('debug'):
+                            console.print(f"[cyan]Scanned {scanned} .torrent files for existing torrent reuse[/cyan]")
+                        return self._select_torrent_file_match(meta, matches, prefer_small_pieces, mtv_torrent, piece_limit)
+                if max_scan > 0 and scanned >= max_scan:
+                    break
+
+            if index_conn is not None:
+                index_conn.commit()
+
+            if meta.get('debug'):
+                elapsed = time.monotonic() - started
+                console.print(
+                    f"[cyan]Scanned {scanned} .torrent files for existing torrent reuse in {elapsed:.1f}s "
+                    f"({indexed} indexed, {skipped_indexed} already indexed, {unreadable} unreadable/timed out)[/cyan]"
+                )
+
+            return self._select_torrent_file_match(meta, matches, prefer_small_pieces, mtv_torrent, piece_limit)
+        finally:
+            if index_conn is not None:
+                index_conn.commit()
+                index_conn.close()
 
     async def _search_single_client_for_torrent(self, meta: dict[str, Any], client_name: str, prefer_small_pieces: bool, mtv_torrent: bool, piece_limit: bool, best_match: Optional[dict[str, Any]]) -> Union[dict[str, Any], str, None]:
         """Search a single client for an existing torrent by hash or via API search (qbit only)."""
