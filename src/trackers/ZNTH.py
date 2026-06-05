@@ -38,11 +38,9 @@ class ZNTH(UNIT3D):
             'MOVIE': '1',
             'TV': '2',
             'GAMES': '3',
-            'MUSIC_SINGLE': '4',
             'MUSIC': '5',
             'BOOKS': '6',
             'AUDIOBOOKS': '7',
-
         }
         if mapping_only:
             return category_id
@@ -51,8 +49,6 @@ class ZNTH(UNIT3D):
         elif category:
             return {'category_id': category_id.get(category, '9')}
         else:
-            if meta.get('category') == 'MUSIC' and len(meta.get('music_files') or []) == 1:
-                return {'category_id': category_id['MUSIC_SINGLE']}
             meta_category = meta.get('category', '')
             return {'category_id': category_id.get(meta_category, '9')}
 

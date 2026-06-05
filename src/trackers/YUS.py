@@ -48,6 +48,28 @@ class YUS(UNIT3D):
 
         return should_continue
 
+    async def get_category_id(
+        self,
+        meta: Meta,
+        category: Optional[str] = None,
+        reverse: bool = False,
+        mapping_only: bool = False,
+    ) -> dict[str, str]:
+        category_id = {
+            'MOVIE': '1',
+            'TV': '2',
+            'MUSIC': '8',
+        }
+        if mapping_only:
+            return category_id
+        elif reverse:
+            return {v: k for k, v in category_id.items()}
+        elif category is not None:
+            return {'category_id': category_id.get(category, '0')}
+        else:
+            meta_category = meta.get('category', '')
+            return {'category_id': category_id.get(meta_category, '0')}
+
     async def get_type_id(
         self,
         meta: Meta,
@@ -61,7 +83,9 @@ class YUS(UNIT3D):
             'WEBDL': '4',
             'WEBRIP': '5',
             'HDTV': '6',
-            'ENCODE': '3'
+            'ENCODE': '3',
+            'FLAC': '16',
+            'MP3': '9',
         }
         if mapping_only:
             return type_id

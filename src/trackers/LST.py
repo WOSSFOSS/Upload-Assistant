@@ -27,6 +27,9 @@ class LST(UNIT3D):
 
     async def get_additional_checks(self, meta: Meta) -> bool:
         should_continue = True
+        if meta.get('is_music'):
+            return should_continue
+
         if not meta['valid_mi_settings']:
             console.print(f"[bold red]No encoding settings in mediainfo, skipping {self.tracker} upload.[/bold red]")
             return False
@@ -37,6 +40,35 @@ class LST(UNIT3D):
             return False
 
         return should_continue
+
+    async def get_category_id(
+        self,
+        meta: Meta,
+        category: Optional[str] = None,
+        reverse: bool = False,
+        mapping_only: bool = False
+    ) -> dict[str, str]:
+        category_id = {
+            'MOVIE': '1',
+            'TV': '2',
+            'MUSIC': '3',
+        }
+        if mapping_only:
+            return category_id
+        elif reverse:
+            return {v: k for k, v in category_id.items()}
+        elif category is not None:
+            return {'category_id': category_id.get(category, '0')}
+
+        meta_category = meta.get('category', '')
+        resolved_id = category_id.get(meta_category, '0')
+        keywords = str(meta.get('keywords') or '')
+        adult = bool(meta.get('adult', False))
+        anime = bool(meta.get('anime', False))
+        keyword_list = [keyword.strip() for keyword in keywords.lower().split(',')]
+        if (adult and anime) or 'hentai' in keyword_list or (adult and 'animation' in keyword_list):
+            resolved_id = '8'
+        return {'category_id': resolved_id}
 
     async def get_type_id(
         self,
@@ -54,7 +86,8 @@ class LST(UNIT3D):
             'WEBRIP': '5',
             'HDTV': '6',
             'ENCODE': '3',
-            'DVDRIP': '3'
+            'DVDRIP': '3',
+            'FLAC': '7',
         }.get(type, '0')
         return {'type_id': type_id}
 
