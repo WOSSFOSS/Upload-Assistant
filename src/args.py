@@ -114,6 +114,8 @@ class Args:
         parser.add_argument('--retail', action='store_true', required=False, help="Mark book/audiobook as an unmodified retail release")
         parser.add_argument('--scan', action='store_true', required=False, help="Mark eBook as scanned")
         parser.add_argument('--ocr', action='store_true', required=False, help="Mark eBook as OCR processed")
+        parser.add_argument('--comic', action='store_true', required=False, help="Mark book upload as a comic")
+        parser.add_argument('--magazine', action='store_true', required=False, help="Mark book upload as a magazine")
         parser.add_argument('--abridged', action='store_true', required=False, help="Mark audiobook as abridged")
         parser.add_argument('--unabridged', action='store_true', required=False, help="Mark audiobook as unabridged")
         parser.add_argument('--series', nargs=1, required=False, help="Book/Audiobook series name", type=str, dest='book_series')

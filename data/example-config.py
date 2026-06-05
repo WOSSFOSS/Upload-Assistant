@@ -15,6 +15,8 @@ config = {
         # Optional Google Books API key for book/audiobook metadata lookup.
         # ISBN lookups also work without a key, but a key can help with quota limits.
         "google_books_api_key": "",
+        # Optional Open Library User-Agent override for book/audiobook metadata lookup.
+        "open_library_user_agent": "",
 
         # Play the bell sound effect when asking for confirmation
         "sfx_on_prompt": True,

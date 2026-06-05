@@ -148,7 +148,10 @@ class BookProcessor:
     def __init__(self, config: dict[str, Any], base_dir: str) -> None:
         self.config = config
         self.base_dir = base_dir
-        self.user_agent = "Upload Assistant book metadata"
+        self.user_agent = (
+            str(config.get("DEFAULT", {}).get("open_library_user_agent", "")).strip()
+            or "Upload Assistant book metadata (https://github.com/fr1day13/Upload-Assistant)"
+        )
 
     async def process(self, meta: dict[str, Any]) -> dict[str, Any]:
         path = Path(meta["path"])
@@ -184,6 +187,8 @@ class BookProcessor:
         year = _mi_value(meta.get("year"), self._year_from_filename(path.name))
         book_type = str(meta.get("manual_type") or "+".join(book_formats)).upper()
         language, language_iso = self._language_values(meta)
+        is_comic = bool(meta.get("comic", False)) or any(file.suffix.lower() in {".cbz", ".cbr"} for file in book_files)
+        is_magazine = bool(meta.get("magazine", False))
         cover = self._find_cover(image_files)
         if not cover and meta.get("poster"):
             cover = str(meta["poster"])
@@ -197,6 +202,8 @@ class BookProcessor:
         meta.update({
             "is_book": True,
             "is_audiobook": is_audiobook,
+            "is_comic": is_comic,
+            "is_magazine": is_magazine,
             "is_disc": False,
             "isdir": path.is_dir(),
             "category": "BOOK",
@@ -530,22 +537,43 @@ class BookProcessor:
                         params={"bibkeys": f"ISBN:{clean_isbn}", "jscmd": "data", "format": "json"},
                     )
                     response.raise_for_status()
-                    data = response.json()
-                    if not data:
-                        response = await client.get(f"https://openlibrary.org/isbn/{clean_isbn}.json")
+                    api_books_data = response.json()
+                    if isinstance(api_books_data, dict) and api_books_data.get(f"ISBN:{clean_isbn}"):
+                        data = {"api_books": api_books_data}
+                    else:
+                        response = await client.get(
+                            "https://openlibrary.org/search.json",
+                            params={
+                                "isbn": clean_isbn,
+                                "fields": "key,title,author_name,publisher,first_publish_year,publish_year,language,isbn,cover_i,subject",
+                                "limit": 1,
+                            },
+                        )
                         response.raise_for_status()
-                        data = response.json()
+                        search_data = response.json()
+                        data = {"search": search_data} if isinstance(search_data, dict) else {}
                 async with aiofiles.open(cache_file, "w", encoding="utf-8") as f:
                     await f.write(json.dumps(data, indent=2))
             except Exception as e:
                 if meta.get("debug"):
                     console.print(f"[yellow]Open Library lookup failed for ISBN {clean_isbn}: {e}[/yellow]")
                 return None
-        return self._parse_open_library(data, clean_isbn)
+        parsed = self._parse_open_library(data, clean_isbn)
+        if not parsed and meta.get("debug"):
+            console.print(f"[yellow]Open Library lookup found no match for ISBN {clean_isbn}[/yellow]")
+        return parsed
 
     def _parse_open_library(self, data: dict[str, Any], isbn: str) -> Optional[dict[str, Any]]:
         if not isinstance(data, dict) or not data:
             return None
+        api_books = data.get("api_books")
+        if isinstance(api_books, dict):
+            api_books_entry = api_books.get(f"ISBN:{isbn}")
+            if isinstance(api_books_entry, dict):
+                return self._parse_open_library_api_books(api_books_entry, isbn)
+        search = data.get("search")
+        if isinstance(search, dict):
+            return self._parse_open_library_search(search, isbn)
         api_books_entry = data.get(f"ISBN:{isbn}")
         if isinstance(api_books_entry, dict):
             return self._parse_open_library_api_books(api_books_entry, isbn)
@@ -593,6 +621,38 @@ class BookProcessor:
         if isinstance(cover, dict):
             metadata["poster"] = _mi_value(cover.get("large"), cover.get("medium"), cover.get("small"))
         metadata["open_library_link"] = _mi_value(data.get("url"), f"https://openlibrary.org/isbn/{isbn}")
+        return {key: value for key, value in metadata.items() if value}
+
+    def _parse_open_library_search(self, data: dict[str, Any], isbn: str) -> Optional[dict[str, Any]]:
+        docs = data.get("docs")
+        if not isinstance(docs, list) or not docs:
+            return None
+        doc = docs[0] if isinstance(docs[0], dict) else {}
+        if not doc:
+            return None
+        metadata: dict[str, Any] = {"isbn": isbn}
+        metadata["title"] = _mi_value(doc.get("title"))
+        authors = doc.get("author_name")
+        if isinstance(authors, list):
+            metadata["author"] = ", ".join(str(author) for author in authors if author)
+        publishers = doc.get("publisher")
+        if isinstance(publishers, list):
+            metadata["publisher"] = ", ".join(str(pub) for pub in publishers[:3] if pub)
+        metadata["year"] = self._extract_year(_mi_value(doc.get("first_publish_year"), *(doc.get("publish_year") or [])))
+        languages = doc.get("language")
+        if isinstance(languages, list) and languages:
+            full, iso = _resolve_language(str(languages[0]))
+            if _is_valid_language(full, iso):
+                metadata["book_language"] = full
+                metadata["book_language_iso"] = iso
+        subjects = doc.get("subject")
+        if isinstance(subjects, list):
+            metadata["genres"] = ", ".join(str(subject) for subject in subjects[:8] if subject)
+        cover_id = doc.get("cover_i")
+        if cover_id:
+            metadata["poster"] = f"https://covers.openlibrary.org/b/id/{cover_id}-L.jpg"
+        key = _mi_value(doc.get("key"))
+        metadata["open_library_link"] = f"https://openlibrary.org{key}" if key.startswith("/") else f"https://openlibrary.org/isbn/{isbn}"
         return {key: value for key, value in metadata.items() if value}
 
     def _parse_google_books(self, data: dict[str, Any], isbn: str) -> Optional[dict[str, Any]]:

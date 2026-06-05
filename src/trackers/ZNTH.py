@@ -145,6 +145,13 @@ class ZNTH(UNIT3D):
             'HDTV': '6',
             'FLAC': '7',
             'MP3': '8',
+            'UHDTV': '9',
+            'SDTV': '10',
+            'BOOK': '8',
+            'COMIC': '8',
+            'MAGAZINE': '8',
+            'UNABRIDGED': '8',
+            'ABRIDGED': '8',
         }
         if mapping_only:
             return type_id
@@ -153,9 +160,24 @@ class ZNTH(UNIT3D):
         elif type:
             return {'type_id': type_id.get(type, '0')}
         else:
-            meta_type = meta.get('type', '')
+            meta_type = self._get_book_type(meta) if meta.get('is_book') else meta.get('type', '')
             resolved_id = type_id.get(meta_type, '0')
             return {'type_id': resolved_id}
+
+    def _get_book_type(self, meta: dict[str, Any]) -> str:
+        if meta.get('is_audiobook'):
+            return 'ABRIDGED' if meta.get('abridged') else 'UNABRIDGED'
+        if meta.get('is_magazine') or meta.get('magazine'):
+            return 'MAGAZINE'
+        if meta.get('is_comic') or meta.get('comic'):
+            return 'COMIC'
+        formats = meta.get('book_formats') or []
+        if isinstance(formats, list) and any(str(fmt).upper() in {'CBR', 'CBZ'} for fmt in formats):
+            return 'COMIC'
+        meta_type = str(meta.get('type') or '').upper()
+        if any(fmt in meta_type.split('+') for fmt in {'CBR', 'CBZ'}):
+            return 'COMIC'
+        return 'BOOK'
 
     async def get_additional_data(self, meta: dict[str, Any]) -> dict[str, str]:
         return {
