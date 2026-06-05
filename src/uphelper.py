@@ -223,7 +223,7 @@ class UploadHelper:
                 return " - ".join(part for part in parts if part)
             return str(entry)
 
-        def _resolution_sort_key(entry: Union[DupeEntry, str]) -> tuple[int, str]:
+        def _entry_resolution(entry: Union[DupeEntry, str]) -> int:
             text = ""
             if isinstance(entry, dict):
                 text = " ".join(
@@ -239,8 +239,15 @@ class UploadHelper:
                 text = str(entry)
 
             match = re.search(r'\b(4320|2160|1440|1080|720|576|480)[pi]\b', text, flags=re.IGNORECASE)
-            resolution = int(match.group(1)) if match else -1
-            return (-resolution, str(text).lower())
+            return int(match.group(1)) if match else -1
+
+        def _resolution_sort_key(entry: Union[DupeEntry, str]) -> tuple[int, str]:
+            text = ""
+            if isinstance(entry, dict):
+                text = str(entry.get('name') or '')
+            else:
+                text = str(entry)
+            return (-_entry_resolution(entry), text.lower())
 
         def _print_other_uploads() -> None:
             other_uploads = [
@@ -254,7 +261,15 @@ class UploadHelper:
 
             console.print()
             console.print(f"[bold blue]Other uploads:[/bold blue] [yellow]{tracker_name}[/yellow]")
-            console.print(f"[bold cyan]{chr(10).join(_format_dupe(entry) for entry in other_uploads)}[/bold cyan]")
+            target_resolution = _entry_resolution(str(meta.get('resolution', '')))
+            lines = []
+            for entry in other_uploads:
+                line = _format_dupe(entry)
+                if target_resolution != -1 and _entry_resolution(entry) == target_resolution:
+                    lines.append(f"[bold orange1]{line}[/bold orange1]")
+                else:
+                    lines.append(f"[bold cyan]{line}[/bold cyan]")
+            console.print("\n".join(lines))
 
         dupes_list: list[Union[DupeEntry, str]] = dupes
         upload: bool = False

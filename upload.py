@@ -537,7 +537,7 @@ async def process_meta(meta: Meta, base_dir: str, bot: Any = None) -> None:
         sys.exit(1)
     while confirm is False:
         try:
-            editargs_str = cli_ui.ask_string("Input args that need correction e.g. (--tag NTb --category tv --tmdb 12345), or press Enter/back to return")
+            editargs_str = cli_ui.ask_string("Input args that need correction e.g. (--tag NTb --category tv --tmdb movie/12345), or press Enter/back to return")
         except EOFError:
             console.print("\n[red]Exiting on user request (Ctrl+C)[/red]")
             await cleanup_manager.cleanup()
