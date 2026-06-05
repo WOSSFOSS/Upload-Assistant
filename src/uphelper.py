@@ -223,6 +223,25 @@ class UploadHelper:
                 return " - ".join(part for part in parts if part)
             return str(entry)
 
+        def _resolution_sort_key(entry: Union[DupeEntry, str]) -> tuple[int, str]:
+            text = ""
+            if isinstance(entry, dict):
+                text = " ".join(
+                    str(value)
+                    for value in (
+                        entry.get('res'),
+                        entry.get('resolution'),
+                        entry.get('name'),
+                    )
+                    if value not in (None, "")
+                )
+            else:
+                text = str(entry)
+
+            match = re.search(r'\b(4320|2160|1440|1080|720|576|480)[pi]\b', text, flags=re.IGNORECASE)
+            resolution = int(match.group(1)) if match else -1
+            return (-resolution, str(text).lower())
+
         def _print_other_uploads() -> None:
             other_uploads = [
                 entry
@@ -231,6 +250,7 @@ class UploadHelper:
             ]
             if not other_uploads:
                 return
+            other_uploads = sorted(other_uploads, key=_resolution_sort_key)
 
             console.print()
             console.print(f"[bold blue]Other uploads:[/bold blue] [yellow]{tracker_name}[/yellow]")
