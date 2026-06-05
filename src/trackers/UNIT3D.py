@@ -482,7 +482,11 @@ class UNIT3D:
                 nfo_bytes = await f.read()
             files["nfo"] = ("nfo_file.nfo", nfo_bytes, "text/plain")
 
+        files.update(await self.get_tracker_specific_files(meta))
         return files
+
+    async def get_tracker_specific_files(self, _meta: dict[str, Any]) -> dict[str, tuple[str, bytes, str]]:
+        return {}
 
     async def upload(self, meta: dict[str, Any], _: Any) -> bool:
         data = await self.get_data(meta)
