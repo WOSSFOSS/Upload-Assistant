@@ -17,10 +17,12 @@ from pymediainfo import MediaInfo
 from src.console import console
 
 
-EBOOK_EXTENSIONS = {".pdf", ".epub", ".mobi", ".azw3", ".cbz", ".cbr"}
+EBOOK_EXTENSIONS = {".pdf", ".epub", ".mobi", ".azw3", ".lit", ".cbz", ".cbr"}
 AUDIOBOOK_EXTENSIONS = {".mp3", ".m4b", ".flac", ".aac", ".m4a", ".ogg", ".opus", ".wav", ".wma"}
 BOOK_EXTENSIONS = EBOOK_EXTENSIONS | AUDIOBOOK_EXTENSIONS
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp"}
+EBOOK_FORMAT_PRIORITY = [".epub", ".azw3", ".mobi", ".pdf", ".lit", ".cbz", ".cbr"]
+AUDIOBOOK_FORMAT_PRIORITY = [".m4b", ".mp3", ".m4a", ".aac", ".flac", ".opus", ".ogg", ".wav", ".wma"]
 BOOK_LINK_ICONS = {
     "Google Books": "https://www.google.com/s2/favicons?domain=books.google.com&sz=32",
     "Open Library": "https://www.google.com/s2/favicons?domain=openlibrary.org&sz=32",
@@ -155,12 +157,17 @@ class BookProcessor:
         if not book_files:
             raise RuntimeError("No supported book or audiobook files found")
 
-        primary_file = max(book_files, key=lambda p: p.stat().st_size if p.exists() else 0)
-        is_audiobook = primary_file.suffix.lower() in AUDIOBOOK_EXTENSIONS
+        ebook_files = [file for file in book_files if file.suffix.lower() in EBOOK_EXTENSIONS]
+        audiobook_files = [file for file in book_files if file.suffix.lower() in AUDIOBOOK_EXTENSIONS]
+        is_audiobook = bool(audiobook_files) and not ebook_files
+        primary_file = self._primary_file(ebook_files if ebook_files else audiobook_files)
+        book_formats = self._book_formats(book_files)
         source_size = sum(p.stat().st_size for p in book_files if p.exists())
         mediainfo = await self._parse_mediainfo(primary_file)
         await self._write_mediainfo_files(meta, primary_file, mediainfo)
 
+        local_metadata = self._folder_metadata(path)
+        self._apply_metadata(meta, local_metadata, overwrite=False)
         local_metadata = await self._local_metadata(primary_file, mediainfo)
         self._apply_metadata(meta, local_metadata, overwrite=False)
         self._apply_cli_overrides(meta)
@@ -175,7 +182,7 @@ class BookProcessor:
         title = _mi_value(meta.get("title"), meta.get("book_title"), primary_file.stem)
         author = _mi_value(meta.get("author"), meta.get("book_author"), "Unknown Author")
         year = _mi_value(meta.get("year"), self._year_from_filename(path.name))
-        book_type = str(meta.get("manual_type") or primary_file.suffix.lower().lstrip(".")).upper()
+        book_type = str(meta.get("manual_type") or "+".join(book_formats)).upper()
         language, language_iso = self._language_values(meta)
         cover = self._find_cover(image_files)
         if not cover and meta.get("poster"):
@@ -221,6 +228,7 @@ class BookProcessor:
             "video": os.fspath(primary_file),
             "filelist": [os.fspath(p) for p in book_files],
             "book_files": [os.fspath(p) for p in book_files],
+            "book_formats": book_formats,
             "source_size": source_size,
             "book_file_count": len(book_files),
             "book_cover": os.fspath(cover) if isinstance(cover, Path) else str(cover or ""),
@@ -273,6 +281,23 @@ class BookProcessor:
             if overwrite or not meta.get(key):
                 meta[key] = value
 
+    def _primary_file(self, files: list[Path]) -> Path:
+        if not files:
+            raise RuntimeError("No supported book or audiobook files found")
+        priorities = AUDIOBOOK_FORMAT_PRIORITY if files[0].suffix.lower() in AUDIOBOOK_EXTENSIONS else EBOOK_FORMAT_PRIORITY
+        for suffix in priorities:
+            match = next((file for file in files if file.suffix.lower() == suffix), None)
+            if match:
+                return match
+        return max(files, key=lambda p: p.stat().st_size if p.exists() else 0)
+
+    def _book_formats(self, files: list[Path]) -> list[str]:
+        suffixes = {file.suffix.lower() for file in files}
+        priority = AUDIOBOOK_FORMAT_PRIORITY if suffixes <= AUDIOBOOK_EXTENSIONS else EBOOK_FORMAT_PRIORITY + AUDIOBOOK_FORMAT_PRIORITY
+        ordered = [suffix.lstrip(".").upper() for suffix in priority if suffix in suffixes]
+        remaining = sorted(suffix.lstrip(".").upper() for suffix in suffixes if suffix not in priority)
+        return ordered + remaining
+
     async def _local_metadata(self, path: Path, mediainfo: dict[str, Any]) -> dict[str, Any]:
         metadata: dict[str, Any] = {}
         if path.suffix.lower() == ".epub":
@@ -292,6 +317,20 @@ class BookProcessor:
                 metadata["book_language_iso"] = iso
         return metadata
 
+    def _folder_metadata(self, path: Path) -> dict[str, Any]:
+        if not path.is_dir():
+            return {}
+        for opf_path in sorted(path.glob("*.opf"), key=lambda p: (p.name.lower() != "metadata.opf", p.name.lower())):
+            try:
+                metadata = self._opf_metadata(opf_path.read_bytes())
+            except Exception as e:
+                if self.config.get("DEFAULT", {}).get("debug", False):
+                    console.print(f"[yellow]Warning: Error parsing OPF metadata from {opf_path.name}: {e}[/yellow]")
+                continue
+            if metadata:
+                return metadata
+        return {}
+
     def _epub_metadata(self, path: Path) -> dict[str, Any]:
         metadata: dict[str, Any] = {}
         if not zipfile.is_zipfile(path):
@@ -309,36 +348,51 @@ class BookProcessor:
                     rootfile = next((name for name in archive.namelist() if name.lower().endswith(".opf")), "")
                 if not rootfile:
                     return metadata
-                root = ET.fromstring(archive.read(rootfile))
-                creators: list[str] = []
-                for elem in root.iter():
-                    tag = elem.tag.split("}")[-1].lower()
-                    value = _clean_text(elem.text or "")
-                    if not value:
-                        continue
-                    if tag == "title" and not metadata.get("title"):
-                        metadata["title"] = value
-                    elif tag == "creator":
-                        creators.append(value)
-                    elif tag == "language":
-                        metadata["book_language_raw"] = value
-                    elif tag == "date":
-                        year = self._extract_year(value)
-                        if year:
-                            metadata["year"] = year
-                    elif tag == "identifier":
-                        isbn = _validate_isbn(value)
-                        if isbn:
-                            metadata["isbn"] = isbn
-                    elif tag == "description":
-                        metadata["overview"] = value
-                    elif tag == "publisher":
-                        metadata["publisher"] = value
-                if creators:
-                    metadata["author"] = ", ".join(dict.fromkeys(creators))
+                metadata.update(self._opf_metadata(archive.read(rootfile)))
         except Exception as e:
             if self.config.get("DEFAULT", {}).get("debug", False):
                 console.print(f"[yellow]Warning: Error parsing EPUB metadata: {e}[/yellow]")
+        return metadata
+
+    def _opf_metadata(self, content: bytes) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        root = ET.fromstring(content)
+        creators: list[str] = []
+        subjects: list[str] = []
+        for elem in root.iter():
+            tag = elem.tag.split("}")[-1].lower()
+            value = _clean_text(elem.text or "")
+            if not value:
+                continue
+            if tag == "title" and not metadata.get("title"):
+                metadata["title"] = value
+            elif tag == "creator":
+                creators.append(value)
+            elif tag == "language":
+                metadata["book_language_raw"] = value
+            elif tag == "date":
+                year = self._extract_year(value)
+                if year:
+                    metadata["year"] = year
+            elif tag == "identifier":
+                isbn = _validate_isbn(value)
+                if isbn:
+                    metadata["isbn"] = isbn
+                scheme = str(elem.attrib.get("{http://www.idpf.org/2007/opf}scheme") or elem.attrib.get("scheme") or "").upper()
+                if scheme == "GOOGLE" and value:
+                    metadata["google_books_link"] = f"https://books.google.com/books?id={value}"
+                elif scheme in {"BARNESNOBLE", "BN"} and value:
+                    metadata["barnes_noble_link"] = f"https://www.barnesandnoble.com/w/{value}"
+            elif tag == "description":
+                metadata["overview"] = value
+            elif tag == "publisher":
+                metadata["publisher"] = value
+            elif tag == "subject":
+                subjects.append(value.replace(".", " / "))
+        if creators:
+            metadata["author"] = ", ".join(dict.fromkeys(creators))
+        if subjects:
+            metadata["genres"] = ", ".join(dict.fromkeys(subjects))
         return metadata
 
     def _comic_metadata(self, path: Path) -> dict[str, Any]:
@@ -471,9 +525,16 @@ class BookProcessor:
         if data is None:
             try:
                 async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers={"User-Agent": self.user_agent}) as client:
-                    response = await client.get(f"https://openlibrary.org/isbn/{clean_isbn}.json")
+                    response = await client.get(
+                        "https://openlibrary.org/api/books",
+                        params={"bibkeys": f"ISBN:{clean_isbn}", "jscmd": "data", "format": "json"},
+                    )
                     response.raise_for_status()
                     data = response.json()
+                    if not data:
+                        response = await client.get(f"https://openlibrary.org/isbn/{clean_isbn}.json")
+                        response.raise_for_status()
+                        data = response.json()
                 async with aiofiles.open(cache_file, "w", encoding="utf-8") as f:
                     await f.write(json.dumps(data, indent=2))
             except Exception as e:
@@ -485,6 +546,9 @@ class BookProcessor:
     def _parse_open_library(self, data: dict[str, Any], isbn: str) -> Optional[dict[str, Any]]:
         if not isinstance(data, dict) or not data:
             return None
+        api_books_entry = data.get(f"ISBN:{isbn}")
+        if isinstance(api_books_entry, dict):
+            return self._parse_open_library_api_books(api_books_entry, isbn)
         metadata: dict[str, Any] = {"isbn": isbn}
         metadata["title"] = _mi_value(data.get("title"))
         if isinstance(data.get("publishers"), list):
@@ -510,6 +574,25 @@ class BookProcessor:
         if isinstance(covers, list) and covers:
             metadata["poster"] = f"https://covers.openlibrary.org/b/id/{covers[0]}-L.jpg"
         metadata["open_library_link"] = f"https://openlibrary.org/isbn/{isbn}"
+        return {key: value for key, value in metadata.items() if value}
+
+    def _parse_open_library_api_books(self, data: dict[str, Any], isbn: str) -> Optional[dict[str, Any]]:
+        metadata: dict[str, Any] = {"isbn": isbn}
+        metadata["title"] = _mi_value(data.get("title"))
+        authors = data.get("authors")
+        if isinstance(authors, list):
+            metadata["author"] = ", ".join(str(author.get("name")) for author in authors if isinstance(author, dict) and author.get("name"))
+        publishers = data.get("publishers")
+        if isinstance(publishers, list):
+            metadata["publisher"] = ", ".join(str(pub.get("name")) for pub in publishers if isinstance(pub, dict) and pub.get("name"))
+        metadata["year"] = self._extract_year(_mi_value(data.get("publish_date")))
+        subjects = data.get("subjects")
+        if isinstance(subjects, list):
+            metadata["genres"] = ", ".join(str(subject.get("name")) for subject in subjects[:8] if isinstance(subject, dict) and subject.get("name"))
+        cover = data.get("cover")
+        if isinstance(cover, dict):
+            metadata["poster"] = _mi_value(cover.get("large"), cover.get("medium"), cover.get("small"))
+        metadata["open_library_link"] = _mi_value(data.get("url"), f"https://openlibrary.org/isbn/{isbn}")
         return {key: value for key, value in metadata.items() if value}
 
     def _parse_google_books(self, data: dict[str, Any], isbn: str) -> Optional[dict[str, Any]]:

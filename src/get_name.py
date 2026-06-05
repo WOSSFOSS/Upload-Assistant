@@ -144,16 +144,32 @@ class NameManager:
             author = str(meta.get('author', '')).strip()
             book_title = str(meta.get('title', '')).strip()
             book_type = str(meta.get('type', '')).strip().upper()
-            language = str(meta.get('book_language', '')).strip()
-            narrator = str(meta.get('narrator', '')).strip()
-            year_part = f"({year})" if year else ""
-            format_label = "AUDIOBOOK" if meta.get('is_audiobook') else "EBOOK"
-            bracket = ' '.join(part for part in [language, book_type, format_label] if part)
-            name = ' '.join(part for part in [f"{author} - {book_title}".strip(" -"), year_part] if part)
-            if narrator and meta.get('is_audiobook'):
-                name = f"{name} narrated by {narrator}"
-            if bracket:
-                name = f"{name} [{bracket}]"
+            isbn = re.sub(r'[-\s]', '', str(meta.get('isbn') or '')).upper()
+            name = ' '.join(part for part in [f"{author} - {book_title}".strip(" -"), year, book_type] if part)
+            if meta.get('is_audiobook'):
+                bitrate = str(meta.get('audiobook_bitrate') or meta.get('bitrate') or '').strip()
+                bitrate_match = re.search(r'\d+(?:\.\d+)?', bitrate)
+                if bitrate_match and book_type in {'MP3', 'AAC', 'OPUS', 'OGG', 'VORBIS', 'M4A'}:
+                    bitrate_value = float(bitrate_match.group(0))
+                    if bitrate_value > 1000:
+                        bitrate_value = bitrate_value / 1000
+                    name = f"{name} {int(round(bitrate_value))}"
+                if isbn:
+                    name = f"{name} {isbn}"
+                if meta.get('retail'):
+                    name = f"{name} Retail"
+            else:
+                edition = str(meta.get('edition') or '').strip()
+                if edition:
+                    name = ' '.join(part for part in [f"{author} - {book_title}".strip(" -"), year, edition, book_type] if part)
+                if isbn:
+                    name = f"{name} {isbn}"
+                if meta.get('retail'):
+                    name = f"{name} Retail"
+                if meta.get('scan'):
+                    name = f"{name} Scan"
+                if meta.get('ocr'):
+                    name = f"{name} OCR"
             potential_missing = ['author', 'title', 'book_language']
         elif meta['category'] == "MOVIE":  # MOVIE SPECIFIC
             if type == "DISC":  # Disk
