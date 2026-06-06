@@ -1,4 +1,5 @@
 import json
+import itertools
 import os
 import re
 import shutil
@@ -87,14 +88,29 @@ class SearchRunner:
                     continue
 
                 content_profile = self._content_profile(name, target)
-                candidates = self._scan_paths(source_paths, content_profile)
+                progress_interval = self._progress_interval(search_config, target)
+                console.print(f"[cyan]{tracker_name}:[/cyan] scanning source libraries for {content_profile} candidates...")
+                candidates = self._scan_paths(
+                    source_paths,
+                    content_profile,
+                    label=f"{tracker_name} source",
+                    progress_interval=progress_interval,
+                )
+                console.print(f"[cyan]{tracker_name}:[/cyan] found {len(candidates)} source candidate(s)")
                 home_releases: list[ReleaseInfo] = []
                 if self._local_prefilter_enabled(search_config, target):
                     home_paths = self._resolve_home_paths(target, libraries_map)
-                    home_candidates = self._scan_paths(home_paths, content_profile) if home_paths else []
+                    home_candidates: list[str] = []
+                    if home_paths:
+                        console.print(f"[cyan]{tracker_name}:[/cyan] scanning target home libraries for local prefilter...")
+                        home_candidates = self._scan_paths(
+                            home_paths,
+                            content_profile,
+                            label=f"{tracker_name} home",
+                            progress_interval=progress_interval,
+                        )
                     home_releases = [self.matcher.parse_release(candidate) for candidate in home_candidates]
-                    if self.debug:
-                        console.print(f"[cyan]{tracker_name}:[/cyan] local prefilter loaded {len(home_releases)} home file(s)")
+                    console.print(f"[cyan]{tracker_name}:[/cyan] local prefilter loaded {len(home_releases)} home candidate(s)")
 
                 cache_file = cache_dir / f"{tracker_name.lower()}_{name}_search_plan.json"
                 api_cache_file = cache_dir / f"{tracker_name.lower()}_{name}_api_cache.json"
@@ -108,6 +124,7 @@ class SearchRunner:
                     content_profile,
                     api_cache,
                     tmdb_cache,
+                    progress_interval,
                 )
                 await self._write_json(cache_file, search_plan)
                 if self._api_cache_enabled(search_config, target):
@@ -194,32 +211,52 @@ class SearchRunner:
             values = []
         return [Path(item).expanduser() for item in values if item.strip()]
 
-    def _scan_paths(self, paths: list[Path], content_profile: str = "generic") -> list[str]:
+    def _scan_paths(
+        self,
+        paths: list[Path],
+        content_profile: str = "generic",
+        label: str = "search",
+        progress_interval: int = 5000,
+    ) -> list[str]:
         candidates: list[str] = []
         seen: set[str] = set()
+        scanned = 0
         for path in paths:
             if not path.exists():
                 console.print(f"[yellow]Search path not found: {path}[/yellow]")
                 continue
+            console.print(f"[dim]{label}: scanning {path}[/dim]")
             if path.is_file():
                 self._add_candidate(path, candidates, seen, content_profile)
                 continue
             if path.is_dir():
-                self._scan_directory(path, candidates, seen, content_profile)
+                scanned += self._scan_directory(path, candidates, seen, content_profile, label, progress_interval)
         return candidates
 
-    def _scan_directory(self, root: Path, candidates: list[str], seen: set[str], content_profile: str) -> None:
+    def _scan_directory(
+        self,
+        root: Path,
+        candidates: list[str],
+        seen: set[str],
+        content_profile: str,
+        label: str,
+        progress_interval: int,
+    ) -> int:
         if self._add_disc_candidate(root, candidates, seen):
-            return
+            return 1
 
-        season_pack_dirs = self._season_pack_dirs(root) if content_profile == "tv" else set()
+        season_pack_dirs = self._season_pack_dirs(root, label, progress_interval) if content_profile == "tv" else set()
         if content_profile == "tv":
             for pack_dir in sorted(season_pack_dirs, key=lambda p: os.fspath(p).lower()):
                 self._add_path_candidate(pack_dir, candidates, seen)
-            return
+            return len(season_pack_dirs)
 
         skipped_disc_roots: set[Path] = set()
-        for item in sorted(root.rglob("*"), key=lambda p: os.fspath(p).lower()):
+        scanned = 0
+        for item in root.rglob("*"):
+            scanned += 1
+            if progress_interval > 0 and scanned % progress_interval == 0:
+                console.print(f"[dim]{label}: scanned {scanned} filesystem item(s), found {len(candidates)} candidate(s)...[/dim]")
             if any(item == disc_root or disc_root in item.parents for disc_root in skipped_disc_roots):
                 continue
             if item.is_dir() and self._add_disc_candidate(item, candidates, seen):
@@ -227,6 +264,9 @@ class SearchRunner:
                 continue
             if item.is_file():
                 self._add_candidate(item, candidates, seen, content_profile)
+        if scanned and progress_interval > 0:
+            console.print(f"[dim]{label}: scanned {scanned} filesystem item(s), found {len(candidates)} candidate(s)[/dim]")
+        return scanned
 
     def _add_candidate(self, path: Path, candidates: list[str], seen: set[str], content_profile: str = "generic") -> None:
         suffix = path.suffix.lower()
@@ -266,9 +306,14 @@ class SearchRunner:
                     return True
         return False
 
-    def _season_pack_dirs(self, root: Path) -> set[Path]:
+    def _season_pack_dirs(self, root: Path, label: str, progress_interval: int) -> set[Path]:
         pack_dirs: set[Path] = set()
-        for directory in [root, *[item for item in root.rglob("*") if item.is_dir()]]:
+        scanned = 0
+        directories = (item for item in root.rglob("*") if item.is_dir())
+        for directory in itertools.chain([root], directories):
+            scanned += 1
+            if progress_interval > 0 and scanned % progress_interval == 0:
+                console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)...[/dim]")
             if self._is_disc_root(directory):
                 continue
             video_files = [
@@ -279,6 +324,8 @@ class SearchRunner:
             ]
             if len(video_files) >= 2 and (self._is_season_pack_name(directory.name) or self._has_single_season(video_files)):
                 pack_dirs.add(directory)
+        if scanned and progress_interval > 0:
+            console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)[/dim]")
         return pack_dirs
 
     def _has_single_season(self, paths: list[Path]) -> bool:
@@ -369,7 +416,12 @@ class SearchRunner:
         api_cache_ttl_days = self._api_cache_ttl_days(search_config, target)
         tmdb_lookup = self._tmdb_lookup_enabled(search_config, target)
         tmdb_cache_ttl_days = self._tmdb_cache_ttl_days(search_config, target)
-        for candidate in candidates:
+        total_candidates = len(candidates)
+        if total_candidates:
+            console.print(f"[cyan]{tracker_name}:[/cyan] checking {total_candidates} candidate(s) against filters/cache/API...")
+        for index, candidate in enumerate(candidates, start=1):
+            if progress_interval > 0 and (index == 1 or index % progress_interval == 0):
+                console.print(f"[dim]{tracker_name}: checked {index - 1}/{total_candidates} candidate(s)...[/dim]")
             release = self.matcher.parse_release(candidate)
             ids = {}
             if tmdb_lookup:
@@ -471,6 +523,8 @@ class SearchRunner:
             if self.debug:
                 color = "green" if should_queue else "yellow"
                 console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} ({tracker_result.get('reason')})[/{color}]")
+        if total_candidates:
+            console.print(f"[cyan]{tracker_name}:[/cyan] finished checking {total_candidates} candidate(s)")
         return plan
 
     def _local_prefilter_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
@@ -516,6 +570,14 @@ class SearchRunner:
         except (TypeError, ValueError):
             ttl_days = 180.0
         return max(0.0, ttl_days)
+
+    def _progress_interval(self, search_config: dict[str, Any], target: dict[str, Any]) -> int:
+        value = target.get("progress_interval", search_config.get("progress_interval", 5000))
+        try:
+            interval = int(value)
+        except (TypeError, ValueError):
+            interval = 5000
+        return max(0, interval)
 
     def _api_cache_key(self, tracker_name: str, content_profile: str, release: ReleaseInfo) -> str:
         release_key = self.matcher.normalize_release_name(release.release_name)

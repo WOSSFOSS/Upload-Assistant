@@ -993,6 +993,9 @@ config = {
         "tmdb_lookup": True,
         "tmdb_cache": True,
         "tmdb_cache_ttl_days": 180,
+        # Print progress every N scanned filesystem items / checked candidates.
+        # Set to 0 to disable periodic progress messages.
+        "progress_interval": 500,
         # Conservative matching keeps false positives low; later tracker API checks use this threshold for size comparisons.
         "match_mode": "conservative",
         "fuzzy_size_threshold": 0.02,

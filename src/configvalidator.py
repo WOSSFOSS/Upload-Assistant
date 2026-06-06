@@ -665,6 +665,19 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                 section="SEARCH"
             ))
 
+    progress_interval = search.get("progress_interval")
+    if progress_interval is not None:
+        try:
+            interval = int(progress_interval)
+            if interval < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            warnings.append(ConfigValidationWarning(
+                "'progress_interval' should be an integer greater than or equal to 0",
+                key="progress_interval",
+                section="SEARCH"
+            ))
+
     libraries = search.get("libraries", {})
     if libraries is not None and not isinstance(libraries, dict):
         warnings.append(ConfigValidationWarning(
@@ -764,6 +777,18 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                         except (TypeError, ValueError):
                             warnings.append(ConfigValidationWarning(
                                 f"Target '{tracker}' tmdb_cache_ttl_days should be a number greater than or equal to 0",
+                                key=str(tracker),
+                                section="SEARCH"
+                            ))
+                    target_progress_interval = target.get("progress_interval")
+                    if target_progress_interval is not None:
+                        try:
+                            interval = int(target_progress_interval)
+                            if interval < 0:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            warnings.append(ConfigValidationWarning(
+                                f"Target '{tracker}' progress_interval should be an integer greater than or equal to 0",
                                 key=str(tracker),
                                 section="SEARCH"
                             ))
