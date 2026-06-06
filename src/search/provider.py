@@ -1,3 +1,4 @@
+import asyncio
 import json
 import re
 import time
@@ -106,6 +107,8 @@ class SearchProvider:
         queries: list[SearchQuery],
         content_profile: str = "movie",
         ids: Optional[dict[str, Any]] = None,
+        api_delay_seconds: float = 0.0,
+        api_error_backoff_seconds: float = 0.0,
     ) -> dict[str, Any]:
         tracker_key = tracker_name.upper()
         tracker_class = tracker_class_map.get(tracker_key)
@@ -121,7 +124,9 @@ class SearchProvider:
         all_results: list[dict[str, Any]] = []
         query_log: list[dict[str, Any]] = []
 
-        for query in queries:
+        for query_index, query in enumerate(queries):
+            if api_delay_seconds > 0 and query_index > 0:
+                await asyncio.sleep(api_delay_seconds)
             meta = self._search_meta(tracker_key, release, query, content_profile, ids or {})
             try:
                 raw_results = await tracker.search_existing(meta, None)
@@ -134,6 +139,8 @@ class SearchProvider:
                 })
                 if self.debug:
                     console.print(f"[yellow]{tracker_key}: search query '{query.query}' failed: {e}[/yellow]")
+                if api_error_backoff_seconds > 0:
+                    await asyncio.sleep(api_error_backoff_seconds)
                 continue
 
             results = self._coerce_results(raw_results)

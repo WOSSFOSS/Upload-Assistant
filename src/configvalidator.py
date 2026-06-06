@@ -665,6 +665,20 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                 section="SEARCH"
             ))
 
+    for key in ("api_delay_seconds", "api_error_backoff_seconds"):
+        value = search.get(key)
+        if value is not None:
+            try:
+                seconds = float(value)
+                if seconds < 0:
+                    raise ValueError
+            except (TypeError, ValueError):
+                warnings.append(ConfigValidationWarning(
+                    f"'{key}' should be a number greater than or equal to 0",
+                    key=key,
+                    section="SEARCH"
+                ))
+
     progress_interval = search.get("progress_interval")
     if progress_interval is not None:
         try:
@@ -793,6 +807,19 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                                 key=str(tracker),
                                 section="SEARCH"
                             ))
+                    for delay_key in ("api_delay_seconds", "api_error_backoff_seconds"):
+                        delay_value = target.get(delay_key)
+                        if delay_value is not None:
+                            try:
+                                seconds = float(delay_value)
+                                if seconds < 0:
+                                    raise ValueError
+                            except (TypeError, ValueError):
+                                warnings.append(ConfigValidationWarning(
+                                    f"Target '{tracker}' {delay_key} should be a number greater than or equal to 0",
+                                    key=str(tracker),
+                                    section="SEARCH"
+                                ))
                     target_progress_interval = target.get("progress_interval")
                     if target_progress_interval is not None:
                         try:

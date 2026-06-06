@@ -988,6 +988,11 @@ config = {
         "api_cache": True,
         "api_cache_ttl_days": 30,
         "api_cache_unknown": False,
+        # Optional grace period for tracker API searches.
+        # api_delay_seconds waits between query stages for the same release; keep global low and override noisy trackers below if needed.
+        # api_error_backoff_seconds waits after a tracker API error before trying the next query.
+        "api_delay_seconds": 0,
+        "api_error_backoff_seconds": 5,
         # Resolve TMDB/IMDb IDs before tracker searches when possible.
         # This cache is tracker-independent and avoids repeating TMDB lookups for the same release.
         "tmdb_lookup": True,
@@ -1042,6 +1047,9 @@ config = {
                         "queue_name": "search_bhd_movies",
                         # Queue unknown results when tracker search fails or cannot be performed.
                         "queue_unknown": True,
+                        # Optional per-target override for sensitive APIs, e.g. BHD:
+                        # "api_delay_seconds": 2,
+                        # "api_error_backoff_seconds": 10,
                         # Optional: hardlink, symlink, copy, or empty to queue original files.
                         "linking": "",
                         "link_destination": "",

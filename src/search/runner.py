@@ -531,6 +531,8 @@ class SearchRunner:
         api_cache_ttl_days = self._api_cache_ttl_days(search_config, target)
         tmdb_lookup = self._tmdb_lookup_enabled(search_config, target)
         tmdb_cache_ttl_days = self._tmdb_cache_ttl_days(search_config, target)
+        api_delay_seconds = self._api_delay_seconds(search_config, target)
+        api_error_backoff_seconds = self._api_error_backoff_seconds(search_config, target)
         total_candidates = len(candidates)
         if total_candidates:
             console.print(f"[cyan]{tracker_name}:[/cyan] checking {total_candidates} candidate(s) against filters/cache/API...")
@@ -655,7 +657,15 @@ class SearchRunner:
                 )
                 continue
 
-            tracker_result = await self.provider.check_tracker(tracker_name, release, queries, content_profile, ids)
+            tracker_result = await self.provider.check_tracker(
+                tracker_name,
+                release,
+                queries,
+                content_profile,
+                ids,
+                api_delay_seconds=api_delay_seconds,
+                api_error_backoff_seconds=api_error_backoff_seconds,
+            )
             status = str(tracker_result.get("status") or "unknown")
             should_queue = status == "missing" or (status == "unknown" and include_unknown)
             if api_cache_enabled and self._should_cache_status(status, search_config, target):
@@ -753,6 +763,22 @@ class SearchRunner:
         except (TypeError, ValueError):
             interval = 500
         return max(0, interval)
+
+    def _api_delay_seconds(self, search_config: dict[str, Any], target: dict[str, Any]) -> float:
+        value = target.get("api_delay_seconds", search_config.get("api_delay_seconds", 0))
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            delay = 0.0
+        return max(0.0, delay)
+
+    def _api_error_backoff_seconds(self, search_config: dict[str, Any], target: dict[str, Any]) -> float:
+        value = target.get("api_error_backoff_seconds", search_config.get("api_error_backoff_seconds", 5))
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            delay = 5.0
+        return max(0.0, delay)
 
     def _scan_cache_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
         if "scan_cache" in target:
