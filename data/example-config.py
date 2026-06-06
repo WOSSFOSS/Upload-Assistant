@@ -1008,7 +1008,7 @@ config = {
         # Print progress every N scanned filesystem items / checked candidates.
         # Set to 0 to disable periodic progress messages.
         "progress_interval": 5000,
-        # Write partial search plans/caches every N checked candidates.
+        # Write partial search plans/caches/queues every N checked candidates.
         # Set to 0 to only write final files after the target has completed.
         "checkpoint_interval": 5000,
         # Conservative matching keeps false positives low; later tracker API checks use this threshold for size comparisons.

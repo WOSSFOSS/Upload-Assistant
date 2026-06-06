@@ -286,6 +286,8 @@ class SearchRunner:
         tmdb_cache_file = context["tmdb_cache_file"]
         queue_dir = context["queue_dir"]
         profile_name = str(context["profile_name"])
+        queue_name = str(target.get("queue_name") or f"search_{tracker_name.lower()}_{profile_name}").strip()
+        queue_file = queue_dir / f"{queue_name}_queue.log"
 
         search_plan = await self._execute_search_plan(
             candidates,
@@ -301,6 +303,7 @@ class SearchRunner:
             cache_file,
             api_cache_file,
             tmdb_cache_file,
+            queue_file,
         )
         await self._write_json(cache_file, search_plan)
         if self._api_cache_enabled(search_config, target):
@@ -313,8 +316,6 @@ class SearchRunner:
             if item.get("queue", False)
         ]
         queue_candidates = self._materialize_candidates(queue_source_candidates, target, tracker_name)
-        queue_name = str(target.get("queue_name") or f"search_{tracker_name.lower()}_{profile_name}").strip()
-        queue_file = queue_dir / f"{queue_name}_queue.log"
         await self._write_queue(queue_file, queue_candidates)
 
         console.print(
@@ -590,6 +591,15 @@ class SearchRunner:
             if not source.is_file():
                 linked_candidates.append(candidate)
                 continue
+            if linking == "copy":
+                existing_copy = destination_root / source.name
+                if existing_copy.exists():
+                    try:
+                        if existing_copy.stat().st_size == source.stat().st_size:
+                            linked_candidates.append(os.fspath(existing_copy.resolve()))
+                            continue
+                    except OSError:
+                        pass
             destination = self._unique_destination(destination_root, source)
             if destination.exists():
                 linked_candidates.append(os.fspath(destination.resolve()))
@@ -622,6 +632,7 @@ class SearchRunner:
         cache_file: Path,
         api_cache_file: Path,
         tmdb_cache_file: Path,
+        queue_file: Path,
     ) -> list[dict[str, Any]]:
         plan: list[dict[str, Any]] = []
         include_unknown = bool(target.get("queue_unknown", True))
@@ -680,6 +691,7 @@ class SearchRunner:
                     search_config,
                     target,
                     tracker_name,
+                    queue_file,
                 )
                 continue
             if torrent_index_prefilter:
@@ -713,6 +725,7 @@ class SearchRunner:
                         search_config,
                         target,
                         tracker_name,
+                        queue_file,
                     )
                     continue
             if local_prefilter and home_releases:
@@ -751,6 +764,7 @@ class SearchRunner:
                         search_config,
                         target,
                         tracker_name,
+                        queue_file,
                     )
                     continue
 
@@ -788,6 +802,7 @@ class SearchRunner:
                     search_config,
                     target,
                     tracker_name,
+                    queue_file,
                 )
                 continue
 
@@ -833,6 +848,7 @@ class SearchRunner:
                 search_config,
                 target,
                 tracker_name,
+                queue_file,
             )
         if total_candidates:
             console.print(f"[cyan]{tracker_name}:[/cyan] finished checking {total_candidates} candidate(s)")
@@ -1134,6 +1150,7 @@ class SearchRunner:
         search_config: dict[str, Any],
         target: dict[str, Any],
         tracker_name: str,
+        queue_file: Path,
     ) -> None:
         if checkpoint_interval <= 0 or index % checkpoint_interval != 0:
             return
@@ -1142,8 +1159,18 @@ class SearchRunner:
             await self._write_json(api_cache_file, api_cache)
         if self._tmdb_cache_enabled(search_config, target):
             await self._write_json(tmdb_cache_file, tmdb_cache)
+        queue_source_candidates = [
+            str(item["path"])
+            for item in plan
+            if item.get("queue", False)
+        ]
+        queue_candidates = self._materialize_candidates(queue_source_candidates, target, tracker_name)
+        await self._write_queue(queue_file, queue_candidates)
         if self.debug:
-            console.print(f"[dim]{tracker_name}: checkpoint saved after {index} candidate(s)[/dim]")
+            console.print(
+                f"[dim]{tracker_name}: checkpoint saved after {index} candidate(s), "
+                f"{len(queue_candidates)} queued[/dim]"
+            )
 
     def _api_cache_key(self, tracker_name: str, content_profile: str, release: ReleaseInfo) -> str:
         release_key = self.matcher.normalize_release_name(release.release_name)
