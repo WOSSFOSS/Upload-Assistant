@@ -678,6 +678,19 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                 section="SEARCH"
             ))
 
+    checkpoint_interval = search.get("checkpoint_interval")
+    if checkpoint_interval is not None:
+        try:
+            interval = int(checkpoint_interval)
+            if interval < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            warnings.append(ConfigValidationWarning(
+                "'checkpoint_interval' should be an integer greater than or equal to 0",
+                key="checkpoint_interval",
+                section="SEARCH"
+            ))
+
     libraries = search.get("libraries", {})
     if libraries is not None and not isinstance(libraries, dict):
         warnings.append(ConfigValidationWarning(
@@ -789,6 +802,18 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                         except (TypeError, ValueError):
                             warnings.append(ConfigValidationWarning(
                                 f"Target '{tracker}' progress_interval should be an integer greater than or equal to 0",
+                                key=str(tracker),
+                                section="SEARCH"
+                            ))
+                    target_checkpoint_interval = target.get("checkpoint_interval")
+                    if target_checkpoint_interval is not None:
+                        try:
+                            interval = int(target_checkpoint_interval)
+                            if interval < 0:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            warnings.append(ConfigValidationWarning(
+                                f"Target '{tracker}' checkpoint_interval should be an integer greater than or equal to 0",
                                 key=str(tracker),
                                 section="SEARCH"
                             ))

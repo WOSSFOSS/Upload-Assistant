@@ -96,6 +96,10 @@ class SearchRunner:
 
                 content_profile = self._content_profile(name, target)
                 progress_interval = self._progress_interval(search_config, target)
+                checkpoint_interval = self._checkpoint_interval(search_config, target)
+                cache_file = cache_dir / f"{tracker_name.lower()}_{name}_search_plan.json"
+                scan_checkpoint_file = cache_dir / f"{tracker_name.lower()}_{name}_scan_checkpoint.json"
+                api_cache_file = cache_dir / f"{tracker_name.lower()}_{name}_api_cache.json"
                 console.print(f"[cyan]{tracker_name}:[/cyan] scanning source libraries for {content_profile} candidates...")
                 candidates = self._scan_paths(
                     source_paths,
@@ -104,10 +108,19 @@ class SearchRunner:
                     progress_interval=progress_interval,
                 )
                 console.print(f"[cyan]{tracker_name}:[/cyan] found {len(candidates)} source candidate(s)")
+                await self._write_scan_checkpoint(
+                    scan_checkpoint_file,
+                    tracker_name,
+                    name,
+                    content_profile,
+                    candidates,
+                    [],
+                    stage="source_scanned",
+                )
                 home_releases: list[ReleaseInfo] = []
+                home_candidates: list[str] = []
                 if self._local_prefilter_enabled(search_config, target):
                     home_paths = self._resolve_home_paths(target, libraries_map)
-                    home_candidates: list[str] = []
                     if home_paths:
                         console.print(f"[cyan]{tracker_name}:[/cyan] scanning target home libraries for local prefilter...")
                         home_candidates = self._scan_paths(
@@ -118,9 +131,16 @@ class SearchRunner:
                         )
                     home_releases = [self.matcher.parse_release(candidate) for candidate in home_candidates]
                     console.print(f"[cyan]{tracker_name}:[/cyan] local prefilter loaded {len(home_releases)} home candidate(s)")
+                    await self._write_scan_checkpoint(
+                        scan_checkpoint_file,
+                        tracker_name,
+                        name,
+                        content_profile,
+                        candidates,
+                        home_candidates,
+                        stage="home_scanned",
+                    )
 
-                cache_file = cache_dir / f"{tracker_name.lower()}_{name}_search_plan.json"
-                api_cache_file = cache_dir / f"{tracker_name.lower()}_{name}_api_cache.json"
                 api_cache = await self._load_api_cache(api_cache_file)
                 search_plan = await self._execute_search_plan(
                     candidates,
@@ -132,6 +152,10 @@ class SearchRunner:
                     api_cache,
                     tmdb_cache,
                     progress_interval,
+                    checkpoint_interval,
+                    cache_file,
+                    api_cache_file,
+                    tmdb_cache_file,
                 )
                 await self._write_json(cache_file, search_plan)
                 if self._api_cache_enabled(search_config, target):
@@ -421,6 +445,10 @@ class SearchRunner:
         api_cache: dict[str, Any],
         tmdb_cache: dict[str, Any],
         progress_interval: int,
+        checkpoint_interval: int,
+        cache_file: Path,
+        api_cache_file: Path,
+        tmdb_cache_file: Path,
     ) -> list[dict[str, Any]]:
         plan: list[dict[str, Any]] = []
         include_unknown = bool(target.get("queue_unknown", True))
@@ -464,6 +492,19 @@ class SearchRunner:
                 })
                 if self.debug:
                     console.print(f"[yellow]{tracker_name}: {release.basename} -> banned_group ({banned_group})[/yellow]")
+                await self._checkpoint_search_progress(
+                    index,
+                    checkpoint_interval,
+                    cache_file,
+                    plan,
+                    api_cache_file,
+                    api_cache,
+                    tmdb_cache_file,
+                    tmdb_cache,
+                    search_config,
+                    target,
+                    tracker_name,
+                )
                 continue
             if local_prefilter and home_releases:
                 local_exists, local_reason, local_match = self.matcher.local_duplicate_exists(
@@ -489,6 +530,19 @@ class SearchRunner:
                     if self.debug:
                         match_name = local_match.basename if local_match else "unknown"
                         console.print(f"[yellow]{tracker_name}: {release.basename} -> local_exists ({local_reason}: {match_name})[/yellow]")
+                    await self._checkpoint_search_progress(
+                        index,
+                        checkpoint_interval,
+                        cache_file,
+                        plan,
+                        api_cache_file,
+                        api_cache,
+                        tmdb_cache_file,
+                        tmdb_cache,
+                        search_config,
+                        target,
+                        tracker_name,
+                    )
                     continue
 
             cache_key = self._api_cache_key(tracker_name, content_profile, release)
@@ -513,6 +567,19 @@ class SearchRunner:
                 if self.debug:
                     color = "green" if should_queue else "yellow"
                     console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} (api_cache_hit)[/{color}]")
+                await self._checkpoint_search_progress(
+                    index,
+                    checkpoint_interval,
+                    cache_file,
+                    plan,
+                    api_cache_file,
+                    api_cache,
+                    tmdb_cache_file,
+                    tmdb_cache,
+                    search_config,
+                    target,
+                    tracker_name,
+                )
                 continue
 
             tracker_result = await self.provider.check_tracker(tracker_name, release, queries, content_profile, ids)
@@ -537,6 +604,19 @@ class SearchRunner:
             if self.debug:
                 color = "green" if should_queue else "yellow"
                 console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} ({tracker_result.get('reason')})[/{color}]")
+            await self._checkpoint_search_progress(
+                index,
+                checkpoint_interval,
+                cache_file,
+                plan,
+                api_cache_file,
+                api_cache,
+                tmdb_cache_file,
+                tmdb_cache,
+                search_config,
+                target,
+                tracker_name,
+            )
         if total_candidates:
             console.print(f"[cyan]{tracker_name}:[/cyan] finished checking {total_candidates} candidate(s)")
         return plan
@@ -592,6 +672,63 @@ class SearchRunner:
         except (TypeError, ValueError):
             interval = 5000
         return max(0, interval)
+
+    def _checkpoint_interval(self, search_config: dict[str, Any], target: dict[str, Any]) -> int:
+        value = target.get("checkpoint_interval", search_config.get("checkpoint_interval", 500))
+        try:
+            interval = int(value)
+        except (TypeError, ValueError):
+            interval = 500
+        return max(0, interval)
+
+    async def _write_scan_checkpoint(
+        self,
+        path: Path,
+        tracker_name: str,
+        profile_name: str,
+        content_profile: str,
+        source_candidates: list[str],
+        home_candidates: list[str],
+        stage: str,
+    ) -> None:
+        await self._write_json(path, {
+            "version": 1,
+            "stage": stage,
+            "tracker": tracker_name,
+            "profile": profile_name,
+            "content": content_profile,
+            "source_count": len(source_candidates),
+            "home_count": len(home_candidates),
+            "source_candidates": source_candidates,
+            "home_candidates": home_candidates,
+            "updated_at": time.time(),
+        })
+        if self.debug:
+            console.print(f"[cyan]{tracker_name}:[/cyan] wrote scan checkpoint to [cyan]{path}[/cyan]")
+
+    async def _checkpoint_search_progress(
+        self,
+        index: int,
+        checkpoint_interval: int,
+        cache_file: Path,
+        plan: list[dict[str, Any]],
+        api_cache_file: Path,
+        api_cache: dict[str, Any],
+        tmdb_cache_file: Path,
+        tmdb_cache: dict[str, Any],
+        search_config: dict[str, Any],
+        target: dict[str, Any],
+        tracker_name: str,
+    ) -> None:
+        if checkpoint_interval <= 0 or index % checkpoint_interval != 0:
+            return
+        await self._write_json(cache_file, plan)
+        if self._api_cache_enabled(search_config, target):
+            await self._write_json(api_cache_file, api_cache)
+        if self._tmdb_cache_enabled(search_config, target):
+            await self._write_json(tmdb_cache_file, tmdb_cache)
+        if self.debug:
+            console.print(f"[dim]{tracker_name}: checkpoint saved after {index} candidate(s)[/dim]")
 
     def _api_cache_key(self, tracker_name: str, content_profile: str, release: ReleaseInfo) -> str:
         release_key = self.matcher.normalize_release_name(release.release_name)
