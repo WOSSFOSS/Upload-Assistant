@@ -661,7 +661,7 @@ class MTV:
         return False
 
     async def search_existing(self, meta: Meta, _disctype: str) -> list[dict[str, Any]]:
-        if meta['type'] not in ['WEBDL'] and meta.get('tag', "") and any(x in meta['tag'] for x in ['EVO']):
+        if not meta.get('search_mode') and meta['type'] not in ['WEBDL'] and meta.get('tag', "") and any(x in meta['tag'] for x in ['EVO']):
             if not meta['unattended'] or (meta['unattended'] and meta.get('unattended_confirm', False)):
                 console.print(f'[bold red]Group {meta["tag"]} is only allowed for raw type content at {self.tracker}[/bold red]')
                 if cli_ui.ask_yes_no("Do you want to upload anyway?", default=False):
@@ -677,7 +677,7 @@ class MTV:
                          'Okay-Subs', 'hchcsen', 'Noyr', 'TTGA', 'GJM', 'Kaleido-Subs', 'GJM-Kaleido', 'LostYears',
                          'Reza', 'Aergia', 'Drag', 'Crow', 'Arid', 'JySzE', 'iKaos', 'Spirale', 'CsS', 'FLE', 'WSE',
                          'Legion', 'AC', 'UQW', 'Commie', 'Chihiro']
-        if meta['resolution'] not in ['2160p'] and meta['video_codec'] in ['HEVC']:
+        if not meta.get('search_mode') and meta['resolution'] not in ['2160p'] and meta['video_codec'] in ['HEVC']:
             if meta['anime'] and meta.get('tag', "") and not any(x in meta['tag'] for x in allowed_anime):
                 if not meta['unattended'] or (meta['unattended'] and meta.get('unattended_confirm', False)):
                     console.print(f'[bold red]Only 4K HEVC anime releases from {meta["tag"]} are allowed at {self.tracker}[/bold red]')
@@ -714,7 +714,7 @@ class MTV:
             genres_list.append(str(genres_value))
         keywords_lower = {k.lower() for k in keywords_list if k}
         genres_lower = {g.lower() for g in genres_list if g}
-        if any(keyword in keywords_lower for keyword in disallowed_keywords) or any(genre in genres_lower for genre in disallowed_genres):
+        if not meta.get('search_mode') and (any(keyword in keywords_lower for keyword in disallowed_keywords) or any(genre in genres_lower for genre in disallowed_genres)):
             if (not meta['unattended'] or (meta['unattended'] and meta.get('unattended_confirm', False))):
                 console.print(f'[bold red]Porn/xxx is not allowed at {self.tracker}.[/bold red]')
                 if cli_ui.ask_yes_no("Do you want to upload anyway?", default=False):
@@ -778,26 +778,38 @@ class MTV:
 
         search_queries: list[dict[str, str]] = []
         imdb = int_meta('imdb')
-        if int_meta('imdb_id') != 0 and imdb:
-            search_queries.append({'imdbid': f'tt{imdb:07d}'})
-        elif int_meta('tmdb') != 0:
-            search_queries.append({'tmdbid': str(int_meta('tmdb'))})
-        elif int_meta('tvdb_id') != 0:
-            search_queries.append({'tvdbid': str(int_meta('tvdb_id'))})
+        if meta.get('search_mode'):
+            search_stage = str(meta.get('search_stage') or '').strip().lower()
+            search_query = str(meta.get('search_query') or '').strip()
+            if search_stage == 'imdb' and int_meta('imdb_id') != 0 and imdb:
+                search_queries.append({'imdbid': f'tt{imdb:07d}'})
+            elif search_stage == 'tmdb' and int_meta('tmdb') != 0:
+                search_queries.append({'tmdbid': str(int_meta('tmdb'))})
+            elif search_stage == 'tvdb' and int_meta('tvdb_id') != 0:
+                search_queries.append({'tvdbid': str(int_meta('tvdb_id'))})
+            elif search_query:
+                search_queries.append({'q': clean_search_text(search_query)})
+        else:
+            if int_meta('imdb_id') != 0 and imdb:
+                search_queries.append({'imdbid': f'tt{imdb:07d}'})
+            elif int_meta('tmdb') != 0:
+                search_queries.append({'tmdbid': str(int_meta('tmdb'))})
+            elif int_meta('tvdb_id') != 0:
+                search_queries.append({'tvdbid': str(int_meta('tvdb_id'))})
 
-        title = clean_search_text(meta.get('title'))
-        year = year_value()
-        group = release_group()
-        text_queries = [
-            ' '.join(part for part in (title, year, group) if part),
-            ' '.join(part for part in (title, year) if part),
-            clean_search_text(meta.get('name')),
-            clean_search_text(meta.get('uuid')),
-            clean_search_text(meta.get('path')),
-        ]
-        for query in text_queries:
-            if query:
-                search_queries.append({'q': query})
+            title = clean_search_text(meta.get('title'))
+            year = year_value()
+            group = release_group()
+            text_queries = [
+                ' '.join(part for part in (title, year, group) if part),
+                ' '.join(part for part in (title, year) if part),
+                clean_search_text(meta.get('name')),
+                clean_search_text(meta.get('uuid')),
+                clean_search_text(meta.get('path')),
+            ]
+            for query in text_queries:
+                if query:
+                    search_queries.append({'q': query})
 
         deduped_queries: list[dict[str, str]] = []
         seen_queries: set[tuple[tuple[str, str], ...]] = set()
