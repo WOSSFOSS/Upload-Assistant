@@ -491,14 +491,25 @@ class SearchRunner:
         progress_interval: int,
         scan_memory_cache: dict[tuple[str, tuple[str, ...]], list[str]],
     ) -> list[str]:
-        cache_key = self._scan_memory_cache_key(paths, content_profile)
-        cached = scan_memory_cache.get(cache_key)
-        if cached is not None:
-            console.print(f"[dim]{label}: using in-run scan cache with {len(cached)} candidate(s)[/dim]")
-            return list(cached)
+        candidates: list[str] = []
+        seen: set[str] = set()
+        for path in paths:
+            cache_key = self._scan_memory_cache_key([path], content_profile)
+            cached = scan_memory_cache.get(cache_key)
+            if cached is not None:
+                console.print(f"[dim]{label}: using in-run scan cache for {path} with {len(cached)} candidate(s)[/dim]")
+                for candidate in cached:
+                    if candidate not in seen:
+                        candidates.append(candidate)
+                        seen.add(candidate)
+                continue
 
-        candidates = self._scan_paths(paths, content_profile, label, progress_interval)
-        scan_memory_cache[cache_key] = list(candidates)
+            scanned_candidates = self._scan_paths([path], content_profile, label, progress_interval)
+            scan_memory_cache[cache_key] = list(scanned_candidates)
+            for candidate in scanned_candidates:
+                if candidate not in seen:
+                    candidates.append(candidate)
+                    seen.add(candidate)
         return candidates
 
     def _scan_memory_cache_key(self, paths: list[Path], content_profile: str) -> tuple[str, tuple[str, ...]]:
@@ -720,6 +731,7 @@ class SearchRunner:
         queue_file: Path,
     ) -> list[dict[str, Any]]:
         plan: list[dict[str, Any]] = []
+        api_candidates: list[dict[str, Any]] = []
         include_unknown = bool(target.get("queue_unknown", True))
         local_prefilter = self._local_prefilter_enabled(search_config, target)
         local_size_threshold = self._local_size_threshold(search_config, target)
@@ -734,21 +746,12 @@ class SearchRunner:
         api_error_backoff_seconds = self._api_error_backoff_seconds(search_config, target)
         total_candidates = len(candidates)
         if total_candidates:
-            console.print(f"[cyan]{tracker_name}:[/cyan] checking {total_candidates} candidate(s) against filters/cache/API...")
+            console.print(f"[cyan]{tracker_name}:[/cyan] filtering {total_candidates} source candidate(s) locally/cache-first...")
         for index, candidate in enumerate(candidates, start=1):
             if progress_interval > 0 and (index == 1 or index % progress_interval == 0):
-                console.print(f"[dim]{tracker_name}: checked {index - 1}/{total_candidates} candidate(s)...[/dim]")
+                console.print(f"[dim]{tracker_name}: locally filtered {index - 1}/{total_candidates} candidate(s)...[/dim]")
             release = self.matcher.parse_release(candidate)
-            ids = {}
-            if tmdb_lookup:
-                ids = await self.provider.resolve_external_ids(
-                    release,
-                    content_profile,
-                    tmdb_cache,
-                    ttl_days=tmdb_cache_ttl_days,
-                    delay_seconds=tmdb_delay_seconds,
-                    error_backoff_seconds=tmdb_error_backoff_seconds,
-                )
+            ids: dict[str, Any] = {}
             queries = self.matcher.build_queries(release, ids)
             banned, banned_group = self.provider.banned_release_group(tracker_name, release)
             if banned:
@@ -768,20 +771,7 @@ class SearchRunner:
                 })
                 if self.debug:
                     console.print(f"[yellow]{tracker_name}: {release.basename} -> banned_group ({banned_group})[/yellow]")
-                await self._checkpoint_search_progress(
-                    index,
-                    checkpoint_interval,
-                    cache_file,
-                    plan,
-                    api_cache_file,
-                    api_cache,
-                    tmdb_cache_file,
-                    tmdb_cache,
-                    search_config,
-                    target,
-                    tracker_name,
-                    queue_file,
-                )
+                await self._checkpoint_search_progress(index, checkpoint_interval, cache_file, plan, api_cache_file, api_cache, tmdb_cache_file, tmdb_cache, search_config, target, tracker_name, queue_file)
                 continue
             if torrent_index_prefilter:
                 client_exists, client_reason = self._torrent_index_candidate_exists(release, tracker_name, search_config, target)
@@ -802,20 +792,7 @@ class SearchRunner:
                     })
                     if self.debug:
                         console.print(f"[yellow]{tracker_name}: {release.basename} -> client_exists ({client_reason})[/yellow]")
-                    await self._checkpoint_search_progress(
-                        index,
-                        checkpoint_interval,
-                        cache_file,
-                        plan,
-                        api_cache_file,
-                        api_cache,
-                        tmdb_cache_file,
-                        tmdb_cache,
-                        search_config,
-                        target,
-                        tracker_name,
-                        queue_file,
-                    )
+                    await self._checkpoint_search_progress(index, checkpoint_interval, cache_file, plan, api_cache_file, api_cache, tmdb_cache_file, tmdb_cache, search_config, target, tracker_name, queue_file)
                     continue
             if local_prefilter and home_releases:
                 local_exists, local_reason, local_match = self.matcher.local_duplicate_exists(
@@ -841,20 +818,7 @@ class SearchRunner:
                     if self.debug:
                         match_name = local_match.basename if local_match else "unknown"
                         console.print(f"[yellow]{tracker_name}: {release.basename} -> local_exists ({local_reason}: {match_name})[/yellow]")
-                    await self._checkpoint_search_progress(
-                        index,
-                        checkpoint_interval,
-                        cache_file,
-                        plan,
-                        api_cache_file,
-                        api_cache,
-                        tmdb_cache_file,
-                        tmdb_cache,
-                        search_config,
-                        target,
-                        tracker_name,
-                        queue_file,
-                    )
+                    await self._checkpoint_search_progress(index, checkpoint_interval, cache_file, plan, api_cache_file, api_cache, tmdb_cache_file, tmdb_cache, search_config, target, tracker_name, queue_file)
                     continue
 
             cache_key = self._api_cache_key(tracker_name, content_profile, release)
@@ -879,22 +843,40 @@ class SearchRunner:
                 if self.debug:
                     color = "green" if should_queue else "yellow"
                     console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} (api_cache_hit)[/{color}]")
-                await self._checkpoint_search_progress(
-                    index,
-                    checkpoint_interval,
-                    cache_file,
-                    plan,
-                    api_cache_file,
-                    api_cache,
-                    tmdb_cache_file,
-                    tmdb_cache,
-                    search_config,
-                    target,
-                    tracker_name,
-                    queue_file,
-                )
+                await self._checkpoint_search_progress(index, checkpoint_interval, cache_file, plan, api_cache_file, api_cache, tmdb_cache_file, tmdb_cache, search_config, target, tracker_name, queue_file)
                 continue
 
+            api_candidates.append({
+                "index": index,
+                "candidate": candidate,
+                "release": release,
+                "cache_key": cache_key,
+            })
+
+        if total_candidates:
+            console.print(
+                f"[cyan]{tracker_name}:[/cyan] local/cache filtering complete: "
+                f"{len(api_candidates)} candidate(s) need TMDB/tracker API search"
+            )
+
+        total_api_candidates = len(api_candidates)
+        for api_index, item in enumerate(api_candidates, start=1):
+            if progress_interval > 0 and (api_index == 1 or api_index % progress_interval == 0):
+                console.print(f"[dim]{tracker_name}: API searched {api_index - 1}/{total_api_candidates} candidate(s)...[/dim]")
+            candidate = str(item["candidate"])
+            release = item["release"]
+            cache_key = str(item["cache_key"])
+            ids: dict[str, Any] = {}
+            if tmdb_lookup:
+                ids = await self.provider.resolve_external_ids(
+                    release,
+                    content_profile,
+                    tmdb_cache,
+                    ttl_days=tmdb_cache_ttl_days,
+                    delay_seconds=tmdb_delay_seconds,
+                    error_backoff_seconds=tmdb_error_backoff_seconds,
+                )
+            queries = self.matcher.build_queries(release, ids)
             tracker_result = await self.provider.check_tracker(
                 tracker_name,
                 release,
@@ -926,7 +908,7 @@ class SearchRunner:
                 color = "green" if should_queue else "yellow"
                 console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} ({tracker_result.get('reason')})[/{color}]")
             await self._checkpoint_search_progress(
-                index,
+                len(plan),
                 checkpoint_interval,
                 cache_file,
                 plan,

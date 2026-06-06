@@ -221,6 +221,7 @@ class SearchProvider:
             "search_query": "" if query.stage in {"tmdb", "imdb"} else query.query,
             "search_stage": query.stage,
             "search_mode": True,
+            "ids": ids,
             "trackers": [tracker_name],
             "tracker_status": {tracker_name: {}},
             "debug": self.debug,

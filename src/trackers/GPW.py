@@ -419,9 +419,10 @@ class GPW:
             meta["skipping"] = "GPW"
             return []
 
-        imdb = dict(meta.get("imdb_info", {})).get("imdbID", "")
+        imdb = self._search_imdb_id(meta)
         if not imdb:
-            console.print(f"{self.tracker}: IMDb ID not found in metadata. Skipping search.")
+            if meta.get('debug') or not meta.get('search_mode'):
+                console.print(f"{self.tracker}: IMDb ID not found in metadata. Skipping search.")
             return []
 
         cookies = await self.load_cookies(meta)
@@ -446,6 +447,17 @@ class GPW:
             console.print(f'An unexpected error occurred while processing the session search: {e}', markup=False)
 
         return await self.search_existing_api(meta, imdb)
+
+    def _search_imdb_id(self, meta: dict[str, Any]) -> str:
+        imdb_info = meta.get("imdb_info", {})
+        imdb = dict(imdb_info).get("imdbID", "") if isinstance(imdb_info, dict) else ""
+        if not imdb:
+            imdb = meta.get("imdb") or meta.get("imdb_id") or ""
+        if not imdb and isinstance(meta.get("ids"), dict):
+            imdb = meta["ids"].get("imdb") or ""
+        if str(imdb).strip() in {"", "0", "tt0", "tt0000000"}:
+            return ""
+        return self.format_imdb_id(imdb)
 
     async def search_existing_api(self, meta: dict[str, Any], imdb: Any) -> list[dict[str, Any]]:
         dupes: list[dict[str, Any]] = []
