@@ -62,8 +62,16 @@ class SearchRunner:
         cache_dir = self._resolve_data_path(str(search_config.get("cache_dir") or "data/search_cache"))
         queue_dir.mkdir(parents=True, exist_ok=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
+        console.print(f"[cyan]Search queue dir:[/cyan] {queue_dir}")
+        console.print(f"[cyan]Search cache dir:[/cyan] {cache_dir}")
         tmdb_cache_file = cache_dir / "tmdb_ids_cache.json"
         tmdb_cache = await self._load_api_cache(tmdb_cache_file)
+        await self._write_run_state(
+            cache_dir / "search_run_state.json",
+            profile_name,
+            target_filter,
+            stage="started",
+        )
 
         libraries = search_config.get("libraries")
         libraries_map = libraries if isinstance(libraries, dict) else {}
@@ -100,6 +108,14 @@ class SearchRunner:
                 cache_file = cache_dir / f"{tracker_name.lower()}_{name}_search_plan.json"
                 scan_checkpoint_file = cache_dir / f"{tracker_name.lower()}_{name}_scan_checkpoint.json"
                 api_cache_file = cache_dir / f"{tracker_name.lower()}_{name}_api_cache.json"
+                await self._write_run_state(
+                    cache_dir / "search_run_state.json",
+                    profile_name,
+                    target_filter,
+                    stage="target_started",
+                    tracker=tracker_name,
+                    profile=name,
+                )
                 console.print(f"[cyan]{tracker_name}:[/cyan] scanning source libraries for {content_profile} candidates...")
                 candidates = self._scan_paths(
                     source_paths,
@@ -189,6 +205,13 @@ class SearchRunner:
                     f"{', '.join(sorted(selected_targets))}[/yellow]"
                 )
 
+        await self._write_run_state(
+            cache_dir / "search_run_state.json",
+            profile_name,
+            target_filter,
+            stage="finished",
+            total_written=total_written,
+        )
         console.print(f"[bold green]Search queue generation complete.[/bold green] {total_written} total candidate(s).")
 
     def _selected_profiles(self, profiles: dict[str, Any], profile_name: Optional[str]) -> dict[str, Any]:
@@ -703,8 +726,25 @@ class SearchRunner:
             "home_candidates": home_candidates,
             "updated_at": time.time(),
         })
-        if self.debug:
-            console.print(f"[cyan]{tracker_name}:[/cyan] wrote scan checkpoint to [cyan]{path}[/cyan]")
+        console.print(f"[cyan]{tracker_name}:[/cyan] wrote scan checkpoint to [cyan]{path}[/cyan]")
+
+    async def _write_run_state(
+        self,
+        path: Path,
+        profile_name: Optional[str],
+        target_filter: Optional[list[str]],
+        stage: str,
+        **extra: Any,
+    ) -> None:
+        data = {
+            "version": 1,
+            "stage": stage,
+            "profile": profile_name or "",
+            "target_filter": target_filter or [],
+            "updated_at": time.time(),
+        }
+        data.update(extra)
+        await self._write_json(path, data)
 
     async def _checkpoint_search_progress(
         self,
@@ -827,6 +867,8 @@ class SearchRunner:
     async def _write_json(self, path: Path, data: Any) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         await self._write_text(path, json.dumps(data, indent=4) + "\n")
+        if not path.exists():
+            console.print(f"[red]Search cache write failed: {path} was not created[/red]")
 
     async def _write_text(self, path: Path, text: str) -> None:
         import asyncio
