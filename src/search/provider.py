@@ -194,6 +194,8 @@ class SearchProvider:
         ext = release.basename.rsplit(".", 1)[-1].lower() if "." in release.basename else ""
         is_tv = content_profile == "tv"
         is_disc = self._disc_type(release.path)
+        uhd = "UHD" if release.resolution in {"2160p", "4320p", "8640p"} else ""
+        size_gib = release.size_bytes / (1024 ** 3) if release.size_bytes else 0
         tmdb = str(ids.get("tmdb") or "0")
         imdb = str(ids.get("imdb") or "0")
         imdb_numeric = re.sub(r"^tt", "", imdb)
@@ -215,13 +217,18 @@ class SearchProvider:
             "type": release.type or "ENCODE",
             "source": release.source or "",
             "resolution": release.resolution or "OTHER",
+            "uhd": uhd,
             "sd": 1 if release.resolution in {"480p", "480i", "576p", "576i"} else 0,
             "is_disc": is_disc,
+            "bdinfo": {"size": size_gib} if is_disc == "BDMV" else None,
+            "dvd_size": self._dvd_size(release.size_bytes) if is_disc == "DVD" else "",
             "is_music": False,
             "is_book": False,
             "filelist": [release.path],
             "container": ext,
             "tag": f"-{release.group}" if release.group else "",
+            "audio": "",
+            "video_codec": "",
             "tmdb": tmdb,
             "tmdb_id": int(tmdb) if tmdb.isdigit() else 0,
             "imdb": imdb_numeric if imdb_numeric.isdigit() else "0",
@@ -246,6 +253,10 @@ class SearchProvider:
         if (path_obj / "VIDEO_TS" / "VIDEO_TS.IFO").exists():
             return "DVD"
         return False
+
+    def _dvd_size(self, size_bytes: int) -> str:
+        size_gib = size_bytes / (1024 ** 3) if size_bytes else 0
+        return "DVD5" if size_gib <= 4.7 else "DVD9"
 
     def _tmdb_cache_key(self, content_profile: str, release: ReleaseInfo) -> str:
         title_key = self.matcher.normalize_title(release.title)

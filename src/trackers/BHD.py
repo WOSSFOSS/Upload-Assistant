@@ -575,23 +575,46 @@ class BHD:
                 if data != other_data:
                     searches.append((other_data, True))
 
+                successful_search = False
+                api_errors: list[str] = []
                 for search_data, other_upload in searches:
                     response = await client.post(url, params=search_data)
                     if response.status_code == 200:
                         response_data = cast(dict[str, Any], response.json())
                         if response_data.get('status_code') == 1:
+                            successful_search = True
                             results = cast(list[dict[str, Any]], response_data.get('results', []))
                             for each in results:
                                 append_result(each, other_upload=other_upload)
                         else:
-                            console.print(f"[bold red]BHD failed to search torrents. API Error: {response_data.get('message', 'Unknown Error')}")
+                            error_message = str(response_data.get('message', 'Unknown Error'))
+                            api_errors.append(error_message)
+                            if search_mode:
+                                if meta.get('debug'):
+                                    console.print(f"[yellow]BHD search API error: {error_message}[/yellow]")
+                            else:
+                                console.print(f"[bold red]BHD failed to search torrents. API Error: {error_message}")
                     else:
-                        console.print(f"[bold red]BHD HTTP request failed. Status: {response.status_code}")
+                        error_message = f"HTTP {response.status_code}"
+                        api_errors.append(error_message)
+                        if search_mode:
+                            if meta.get('debug'):
+                                console.print(f"[yellow]BHD search request failed: {error_message}[/yellow]")
+                        else:
+                            console.print(f"[bold red]BHD HTTP request failed. Status: {response.status_code}")
+                if search_mode and api_errors and not successful_search:
+                    raise RuntimeError("; ".join(api_errors))
         except httpx.TimeoutException:
+            if search_mode:
+                raise
             console.print("[bold red]BHD request timed out after 5 seconds")
         except httpx.RequestError as e:
+            if search_mode:
+                raise
             console.print(f"[bold red]BHD unable to search for existing torrents: {e}")
         except Exception as e:
+            if search_mode:
+                raise
             console.print(f"[bold red]BHD unexpected error: {e}")
             await asyncio.sleep(5)
 
