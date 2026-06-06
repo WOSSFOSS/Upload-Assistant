@@ -302,7 +302,7 @@ class SearchRunner:
         label: str,
         progress_interval: int,
     ) -> int:
-        if self._add_disc_candidate(root, candidates, seen):
+        if content_profile != "tv" and self._add_disc_candidate(root, candidates, seen):
             return 1
 
         season_pack_dirs = self._season_pack_dirs(root, label, progress_interval) if content_profile == "tv" else set()
@@ -375,6 +375,7 @@ class SearchRunner:
             if progress_interval > 0 and scanned % progress_interval == 0:
                 console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)...[/dim]")
             if self._is_disc_root(directory):
+                self._add_tv_disc_container_dirs(directory, root, pack_dirs)
                 continue
             video_files = [
                 item for item in directory.iterdir()
@@ -387,6 +388,24 @@ class SearchRunner:
         if scanned and progress_interval > 0:
             console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)[/dim]")
         return pack_dirs
+
+    def _add_tv_disc_container_dirs(self, disc_root: Path, scan_root: Path, pack_dirs: set[Path]) -> None:
+        parent = disc_root.parent
+        if parent == disc_root:
+            return
+
+        added_matching_parent = False
+        for directory in itertools.chain([parent], parent.parents):
+            if directory != scan_root and scan_root not in directory.parents:
+                break
+            if self._is_season_pack_name(directory.name):
+                pack_dirs.add(directory)
+                added_matching_parent = True
+            if directory == scan_root:
+                break
+
+        if not added_matching_parent and parent != scan_root:
+            pack_dirs.add(parent)
 
     def _has_single_season(self, paths: list[Path]) -> bool:
         seasons: set[str] = set()
