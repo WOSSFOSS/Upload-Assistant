@@ -200,25 +200,6 @@ class SearchRunner:
                         )
 
                 api_cache = await self._load_api_cache(api_cache_file)
-                if prepare_cache:
-                    if self._tmdb_lookup_enabled(search_config, target) and self._tmdb_cache_enabled(search_config, target):
-                        await self._prepare_tmdb_cache(
-                            candidates,
-                            tracker_name,
-                            target,
-                            search_config,
-                            home_releases,
-                            content_profile,
-                            tmdb_cache,
-                            tmdb_cache_file,
-                            progress_interval,
-                            checkpoint_interval,
-                        )
-                    if self._api_cache_enabled(search_config, target):
-                        await self._write_json(api_cache_file, api_cache)
-                    if self._tmdb_cache_enabled(search_config, target):
-                        await self._write_json(tmdb_cache_file, tmdb_cache)
-                    continue
                 profile_contexts.append({
                     "candidates": candidates,
                     "tracker_name": tracker_name,
@@ -243,7 +224,7 @@ class SearchRunner:
                     f"{', '.join(sorted(selected_targets))}[/yellow]"
                 )
             if prepare_cache:
-                console.print(f"[green]Prepared search cache for profile '{name}' without tracker API searches.[/green]")
+                await self._prepare_profile_search_cache(profile_contexts, name)
             elif profile_contexts:
                 total_written += await self._run_profile_api_searches(profile_contexts)
 
@@ -342,47 +323,76 @@ class SearchRunner:
         console.print(f"[dim]Upload with: python3 upload.py --queue {queue_name} -tk {tracker_name}[/dim]")
         return len(queue_candidates)
 
-    async def _prepare_tmdb_cache(
-        self,
-        candidates: list[str],
-        tracker_name: str,
-        target: dict[str, Any],
-        search_config: dict[str, Any],
-        home_releases: list[ReleaseInfo],
-        content_profile: str,
-        tmdb_cache: dict[str, Any],
-        tmdb_cache_file: Path,
-        progress_interval: int,
-        checkpoint_interval: int,
-    ) -> None:
-        if content_profile not in {"movie", "tv"}:
+    async def _prepare_profile_search_cache(self, contexts: list[dict[str, Any]], profile_name: str) -> None:
+        tmdb_work: dict[str, tuple[ReleaseInfo, str, dict[str, Any], dict[str, Any]]] = {}
+        total_api_candidates = 0
+        for context in contexts:
+            tracker_name = str(context["tracker_name"])
+            target = context["target"]
+            search_config = context["search_config"]
+            content_profile = str(context["content_profile"])
+            api_cache = context["api_cache"]
+            api_cache_file = context["api_cache_file"]
+            tmdb_cache = context["tmdb_cache"]
+            tmdb_cache_file = context["tmdb_cache_file"]
+
+            api_candidates = self._prepare_target_api_candidates(context)
+            total_api_candidates += len(api_candidates)
+            if self._api_cache_enabled(search_config, target):
+                await self._write_json(api_cache_file, api_cache)
+            if self._tmdb_lookup_enabled(search_config, target) and self._tmdb_cache_enabled(search_config, target):
+                for release in api_candidates:
+                    if content_profile not in {"movie", "tv"}:
+                        continue
+                    key = self._tmdb_work_key(content_profile, release)
+                    tmdb_work.setdefault(key, (release, content_profile, search_config, target))
+                await self._write_json(tmdb_cache_file, tmdb_cache)
+            console.print(
+                f"[green]{tracker_name}:[/green] prepare local/cache filtering complete: "
+                f"{len(api_candidates)} candidate(s) need API metadata/search"
+            )
+
+        if not contexts:
             return
-        total_candidates = len(candidates)
-        if total_candidates:
-            console.print(f"[cyan]{tracker_name}:[/cyan] preparing TMDB/IMDb ID cache for {total_candidates} candidate(s)...")
+        tmdb_cache = contexts[0]["tmdb_cache"]
+        tmdb_cache_file = contexts[0]["tmdb_cache_file"]
+        await self._prepare_global_tmdb_cache(tmdb_work, tmdb_cache, tmdb_cache_file)
+        console.print(
+            f"[green]Prepared search cache for profile '{profile_name}' without tracker API searches.[/green] "
+            f"{total_api_candidates} target candidate(s), {len(tmdb_work)} unique TMDB lookup candidate(s)."
+        )
+
+    def _prepare_target_api_candidates(self, context: dict[str, Any]) -> list[ReleaseInfo]:
+        candidates = list(context["candidates"])
+        tracker_name = str(context["tracker_name"])
+        target = context["target"]
+        search_config = context["search_config"]
+        home_releases = context["home_releases"]
+        content_profile = str(context["content_profile"])
+        api_cache = context["api_cache"]
+        progress_interval = int(context["progress_interval"])
         local_prefilter = self._local_prefilter_enabled(search_config, target)
         local_size_threshold = self._local_size_threshold(search_config, target)
         torrent_index_prefilter = self._torrent_index_prefilter_enabled(search_config, target)
-        tmdb_cache_ttl_days = self._tmdb_cache_ttl_days(search_config, target)
-        tmdb_delay_seconds = self._tmdb_delay_seconds(search_config, target)
-        tmdb_error_backoff_seconds = self._tmdb_error_backoff_seconds(search_config, target)
-        prepared = 0
-        skipped = 0
+        api_cache_enabled = self._api_cache_enabled(search_config, target)
+        api_cache_ttl_days = self._api_cache_ttl_days(search_config, target)
+        api_candidates: list[ReleaseInfo] = []
+        total_candidates = len(candidates)
+        if total_candidates:
+            console.print(f"[cyan]{tracker_name}:[/cyan] prepare filtering {total_candidates} source candidate(s) locally/cache-first...")
         for index, candidate in enumerate(candidates, start=1):
             if progress_interval > 0 and (index == 1 or index % progress_interval == 0):
                 console.print(
-                    f"[dim]{tracker_name}: prepared TMDB IDs for {index - 1}/{total_candidates} "
-                    f"candidate(s), {prepared} cached, {skipped} skipped...[/dim]"
+                    f"[dim]{tracker_name}: prepare filtered {index - 1}/{total_candidates} "
+                    f"candidate(s), {len(api_candidates)} still need API...[/dim]"
                 )
             release = self.matcher.parse_release(candidate)
             banned, _ = self.provider.banned_release_group(tracker_name, release)
             if banned:
-                skipped += 1
                 continue
             if torrent_index_prefilter:
                 client_exists, _ = self._torrent_index_candidate_exists(release, tracker_name, search_config, target)
                 if client_exists:
-                    skipped += 1
                     continue
             if local_prefilter and home_releases:
                 local_exists, _, _ = self.matcher.local_duplicate_exists(
@@ -391,28 +401,52 @@ class SearchRunner:
                     size_threshold=local_size_threshold,
                 )
                 if local_exists:
-                    skipped += 1
                     continue
+            cache_key = self._api_cache_key(tracker_name, content_profile, release)
+            cached_result = self._api_cache_lookup(api_cache, cache_key, api_cache_ttl_days) if api_cache_enabled else None
+            if cached_result is not None:
+                continue
+            api_candidates.append(release)
+        return api_candidates
+
+    async def _prepare_global_tmdb_cache(
+        self,
+        tmdb_work: dict[str, tuple[ReleaseInfo, str, dict[str, Any], dict[str, Any]]],
+        tmdb_cache: dict[str, Any],
+        tmdb_cache_file: Path,
+    ) -> None:
+        work_items = list(tmdb_work.values())
+        total = len(work_items)
+        if not total:
+            await self._write_json(tmdb_cache_file, tmdb_cache)
+            return
+        console.print(f"[cyan]TMDB:[/cyan] preparing {total} unique movie/tv ID lookup candidate(s)...")
+        prepared = 0
+        for index, (release, content_profile, search_config, target) in enumerate(work_items, start=1):
+            progress_interval = self._progress_interval(search_config, target)
+            checkpoint_interval = self._checkpoint_interval(search_config, target)
+            if progress_interval > 0 and (index == 1 or index % progress_interval == 0):
+                console.print(f"[dim]TMDB: prepared {index - 1}/{total} unique candidate(s), {prepared} cached...[/dim]")
             ids = await self.provider.resolve_external_ids(
                 release,
                 content_profile,
                 tmdb_cache,
-                ttl_days=tmdb_cache_ttl_days,
-                delay_seconds=tmdb_delay_seconds,
-                error_backoff_seconds=tmdb_error_backoff_seconds,
+                ttl_days=self._tmdb_cache_ttl_days(search_config, target),
+                delay_seconds=self._tmdb_delay_seconds(search_config, target),
+                error_backoff_seconds=self._tmdb_error_backoff_seconds(search_config, target),
             )
             if ids:
                 prepared += 1
             if checkpoint_interval > 0 and index % checkpoint_interval == 0:
                 await self._write_json(tmdb_cache_file, tmdb_cache)
                 if self.debug:
-                    console.print(f"[dim]{tracker_name}: TMDB cache checkpoint saved after {index} candidate(s)[/dim]")
+                    console.print(f"[dim]TMDB: cache checkpoint saved after {index} unique candidate(s)[/dim]")
         await self._write_json(tmdb_cache_file, tmdb_cache)
-        if total_candidates:
-            console.print(
-                f"[green]{tracker_name}:[/green] prepared TMDB/IMDb cache "
-                f"({prepared} cached, {skipped} skipped)"
-            )
+        console.print(f"[green]TMDB:[/green] prepared ID cache ({prepared}/{total} cached or checked)")
+
+    def _tmdb_work_key(self, content_profile: str, release: ReleaseInfo) -> str:
+        title_key = self.matcher.normalize_title(release.title)
+        return "|".join([content_profile, title_key, release.year])
 
     def _resolve_data_path(self, value: str) -> Path:
         path = Path(value).expanduser()
