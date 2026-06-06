@@ -407,6 +407,7 @@ class SearchRunner:
         content_profile: str,
         api_cache: dict[str, Any],
         tmdb_cache: dict[str, Any],
+        progress_interval: int,
     ) -> list[dict[str, Any]]:
         plan: list[dict[str, Any]] = []
         include_unknown = bool(target.get("queue_unknown", True))

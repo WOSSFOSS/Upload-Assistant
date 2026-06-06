@@ -1554,12 +1554,6 @@ async def do_the_thing(base_dir: str) -> None:
                     console.print(f"[yellow]  ⚠ {warning_str}[/yellow]")
                 console.print()  # Blank line after warnings
 
-        if meta.get('search'):
-            await SearchRunner(config, base_dir, debug=bool(meta.get('debug'))).run(
-                str(meta.get('search_profile') or '').strip() or None
-            )
-            return
-
         if meta.get('cleanup'):
             if os.path.exists(f"{base_dir}/tmp"):
                 shutil.rmtree(f"{base_dir}/tmp")
@@ -1571,6 +1565,13 @@ async def do_the_thing(base_dir: str) -> None:
         search_config = config.get('SEARCH', {})
         if isinstance(search_config, dict) and search_config.get('queue_dir'):
             meta['queue_dir'] = str(search_config['queue_dir'])
+
+        if meta.get('search'):
+            meta.setdefault('uuid', 'search-mode')
+            await SearchRunner(config, base_dir, debug=bool(meta.get('debug'))).run(
+                str(meta.get('search_profile') or '').strip() or None
+            )
+            return
 
         if not meta.get('path'):
             exit(0)
