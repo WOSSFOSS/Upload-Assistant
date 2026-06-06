@@ -1573,6 +1573,7 @@ async def do_the_thing(base_dir: str) -> None:
             await SearchRunner(config, base_dir, debug=bool(meta.get('debug'))).run(
                 str(meta.get('search_profile') or '').strip() or None,
                 target_filter=search_trackers,
+                refresh_scan=bool(meta.get('refresh_scan')),
             )
             return
 

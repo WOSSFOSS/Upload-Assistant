@@ -31,6 +31,8 @@ Common options:
   -tvmaze, --tvmaze          Specify the TVMaze id to use
   -tvdb, --tvdb              Specify the TVDB id to use
   --queue (queue name)       Process an entire folder (including files/subfolders) in a queue
+  --search                   Run configured search profiles and create queue files
+  --refresh-scan             Ignore cached filesystem scan checkpoints for this search run
   -mf, --manual_frames       Comma-separated list of frame numbers to use for screenshots
   -df, --descfile            Path to custom description file
   -serv, --service           Streaming service
@@ -85,6 +87,7 @@ class Args:
         parser.add_argument('--queue', nargs=1, required=False, help="(--queue queue_name) Process an entire folder (files/subfolders) in a queue")
         parser.add_argument('--search', action='store_true', required=False, help="Run configured SEARCH profiles and create UA queue files")
         parser.add_argument('--search-profile', dest='search_profile', nargs=1, required=False, help="Run one configured SEARCH profile")
+        parser.add_argument('--refresh-scan', dest='refresh_scan', action='store_true', required=False, help="Search mode: ignore cached filesystem scan checkpoints and scan source/home libraries again")
         parser.add_argument('-lq', '--limit-queue', dest='limit_queue', nargs=1, required=False, help="Limit the amount of queue files processed", type=int, default=0)
         parser.add_argument('-sc', '--site-check', dest='site_check', action='store_true', required=False, help="Just search sites for suitable uploads and create log file, no uploading", default=False)
         parser.add_argument('-su', '--site-upload', dest='site_upload', nargs=1, required=False, help="Specify a single tracker, and it will process the site searches and upload.", type=str, default=None)

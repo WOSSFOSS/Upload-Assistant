@@ -993,6 +993,12 @@ config = {
         "tmdb_lookup": True,
         "tmdb_cache": True,
         "tmdb_cache_ttl_days": 180,
+        # Cache source/home filesystem scans between runs.
+        # Use upload.py --search --refresh-scan to ignore the cached scan once and write a fresh checkpoint.
+        # Set scan_cache to False to force a fresh scan every time.
+        # Set scan_cache_ttl_hours to 0 to keep scan checkpoints indefinitely.
+        "scan_cache": True,
+        "scan_cache_ttl_hours": 24,
         # Print progress every N scanned filesystem items / checked candidates.
         # Set to 0 to disable periodic progress messages.
         "progress_interval": 5000,
