@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import ast
+import copy
 import json
 import os
 import re
@@ -17,6 +18,98 @@ class LinkedSetting(TypedDict):
 ConfigDict = dict[str, Any]
 ConfigComments = dict[str, list[str]]
 UnexpectedKey = tuple[str, ConfigDict, str]
+
+
+def is_dynamic_config_path(path: str) -> bool:
+    """Return True for config paths where user-defined keys are expected."""
+    dynamic_roots = (
+        "TORRENT_CLIENTS",
+        "SEARCH.libraries",
+        "SEARCH.profiles",
+    )
+    return any(path == root or path.startswith(f"{root}.") for root in dynamic_roots)
+
+
+def copy_missing_static_sections(config_data: ConfigDict, example_config: ConfigDict) -> None:
+    """Add top-level non-interactive sections from the example config when missing."""
+    for section, value in example_config.items():
+        if section in config_data:
+            continue
+        if section in {"DEFAULT", "TRACKERS", "TORRENT_CLIENTS", "DISCORD"}:
+            continue
+        config_data[section] = copy.deepcopy(value)
+
+
+def merge_missing_config_keys(existing: ConfigDict, example: ConfigDict, path: str = "") -> list[str]:
+    """Merge missing example keys without expanding dynamic user-defined subsections."""
+    added: list[str] = []
+    if path and is_dynamic_config_path(path):
+        return added
+    for key, example_value in example.items():
+        current_path = f"{path}.{key}" if path else key
+        if key not in existing:
+            if path == "TRACKERS" and key != "default_trackers":
+                continue
+            existing[key] = copy.deepcopy(example_value)
+            added.append(current_path)
+            continue
+
+        existing_value = existing.get(key)
+        if (
+            isinstance(existing_value, dict)
+            and isinstance(example_value, dict)
+            and not is_dynamic_config_path(current_path)
+        ):
+            added.extend(merge_missing_config_keys(cast(ConfigDict, existing_value), cast(ConfigDict, example_value), current_path))
+    return added
+
+
+def merge_missing_torrent_client_keys(config_data: ConfigDict, example_config: ConfigDict) -> list[str]:
+    """Add missing client keys using the matching example client template."""
+    added: list[str] = []
+    clients = config_data.get("TORRENT_CLIENTS")
+    example_clients = example_config.get("TORRENT_CLIENTS")
+    if not isinstance(clients, dict) or not isinstance(example_clients, dict):
+        return added
+
+    for client_name, client_config in clients.items():
+        if not isinstance(client_config, dict):
+            continue
+        template = example_clients.get(client_name)
+        client_type = client_config.get("torrent_client")
+        if not isinstance(template, dict) and client_type:
+            for example_client in example_clients.values():
+                if isinstance(example_client, dict) and example_client.get("torrent_client") == client_type:
+                    template = example_client
+                    break
+        if not isinstance(template, dict):
+            continue
+        for key, value in template.items():
+            if key not in client_config:
+                client_config[key] = copy.deepcopy(value)
+                added.append(f"TORRENT_CLIENTS.{client_name}.{key}")
+    return added
+
+
+def add_missing_current_options(config_data: ConfigDict, example_config: ConfigDict) -> list[str]:
+    """Bring an existing config up to the current example config shape."""
+    added: list[str] = []
+
+    before_sections = set(config_data)
+    copy_missing_static_sections(config_data, example_config)
+    for section in set(config_data) - before_sections:
+        added.append(section)
+
+    for section in config_data:
+        if section in example_config:
+            added.extend(merge_missing_config_keys(
+                cast(ConfigDict, config_data[section]) if isinstance(config_data[section], dict) else {},
+                cast(ConfigDict, example_config[section]) if isinstance(example_config[section], dict) else {},
+                section,
+            ))
+
+    added.extend(merge_missing_torrent_client_keys(config_data, example_config))
+    return added
 
 
 def read_example_config() -> tuple[Optional[ConfigDict], ConfigComments]:
@@ -139,8 +232,12 @@ def validate_config(existing_config: ConfigDict, example_config: ConfigDict) -> 
             current_path = f"{path}.{key}" if path else key
 
             if key not in example_section:
+                if is_dynamic_config_path(current_path):
+                    continue
                 unexpected_keys.append((current_path, existing_section, key))
             elif isinstance(existing_section[key], dict) and isinstance(example_section.get(key), dict):
+                if is_dynamic_config_path(current_path):
+                    continue
                 # Recursively check nested dictionaries
                 find_unexpected_keys(cast(ConfigDict, existing_section[key]), cast(ConfigDict, example_section[key]), current_path)
 
@@ -149,6 +246,8 @@ def validate_config(existing_config: ConfigDict, example_config: ConfigDict) -> 
         if section not in example_config:
             unexpected_keys.append((section, existing_config, section))
         elif isinstance(existing_config[section], dict) and isinstance(example_config[section], dict):
+            if is_dynamic_config_path(section):
+                continue
             # Check keys within valid sections
             find_unexpected_keys(cast(ConfigDict, existing_config[section]), cast(ConfigDict, example_config[section]), section)
 
@@ -939,6 +1038,8 @@ if __name__ == "__main__":
                 example_discord = example_config.get("DISCORD", {})
                 config_data["DISCORD"] = configure_discord({}, example_discord, config_comments)
 
+                copy_missing_static_sections(config_data, example_config)
+
                 generate_config_file(config_data)
             else:
                 console.print("\n[i] Using existing configuration as a template.", markup=False)
@@ -1054,6 +1155,10 @@ if __name__ == "__main__":
                         for key in missing_discord_keys:
                             config_data["DISCORD"][key] = example_config["DISCORD"][key]
 
+                added_options = add_missing_current_options(config_data, example_config)
+                if added_options:
+                    console.print(f"\n[i] Added {len(added_options)} missing current config option(s).", markup=False)
+
                 # Generate the updated config file
                 generate_config_file(config_data, existing_path)
         else:
@@ -1092,6 +1197,10 @@ if __name__ == "__main__":
                         config_data["DISCORD"][key] = example_config["DISCORD"][key]
                     console.print("[i] Added missing DISCORD keys with default values", markup=False)
 
+            added_options = add_missing_current_options(config_data, example_config)
+            if added_options:
+                console.print(f"\n[i] Added {len(added_options)} missing current config option(s).", markup=False)
+
             # Generate the updated config file
             generate_config_file(config_data, existing_path)
 
@@ -1123,5 +1232,7 @@ if __name__ == "__main__":
         # DISCORD section
         example_discord = example_config.get("DISCORD", {})
         config_data["DISCORD"] = configure_discord({}, example_discord, config_comments)
+
+        copy_missing_static_sections(config_data, example_config)
 
         generate_config_file(config_data)
