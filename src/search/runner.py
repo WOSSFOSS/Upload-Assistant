@@ -61,6 +61,8 @@ class SearchRunner:
         cache_dir = self._resolve_data_path(str(search_config.get("cache_dir") or "data/search_cache"))
         queue_dir.mkdir(parents=True, exist_ok=True)
         cache_dir.mkdir(parents=True, exist_ok=True)
+        tmdb_cache_file = cache_dir / "tmdb_ids_cache.json"
+        tmdb_cache = await self._load_api_cache(tmdb_cache_file)
 
         libraries = search_config.get("libraries")
         libraries_map = libraries if isinstance(libraries, dict) else {}
@@ -105,10 +107,13 @@ class SearchRunner:
                     home_releases,
                     content_profile,
                     api_cache,
+                    tmdb_cache,
                 )
                 await self._write_json(cache_file, search_plan)
                 if self._api_cache_enabled(search_config, target):
                     await self._write_json(api_cache_file, api_cache)
+                if self._tmdb_cache_enabled(search_config, target):
+                    await self._write_json(tmdb_cache_file, tmdb_cache)
                 queue_source_candidates = [
                     str(item["path"])
                     for item in search_plan
@@ -354,6 +359,7 @@ class SearchRunner:
         home_releases: list[ReleaseInfo],
         content_profile: str,
         api_cache: dict[str, Any],
+        tmdb_cache: dict[str, Any],
     ) -> list[dict[str, Any]]:
         plan: list[dict[str, Any]] = []
         include_unknown = bool(target.get("queue_unknown", True))
@@ -361,9 +367,38 @@ class SearchRunner:
         local_size_threshold = self._local_size_threshold(search_config, target)
         api_cache_enabled = self._api_cache_enabled(search_config, target)
         api_cache_ttl_days = self._api_cache_ttl_days(search_config, target)
+        tmdb_lookup = self._tmdb_lookup_enabled(search_config, target)
+        tmdb_cache_ttl_days = self._tmdb_cache_ttl_days(search_config, target)
         for candidate in candidates:
             release = self.matcher.parse_release(candidate)
-            queries = self.matcher.build_queries(release)
+            ids = {}
+            if tmdb_lookup:
+                ids = await self.provider.resolve_external_ids(
+                    release,
+                    content_profile,
+                    tmdb_cache,
+                    ttl_days=tmdb_cache_ttl_days,
+                )
+            queries = self.matcher.build_queries(release, ids)
+            banned, banned_group = self.provider.banned_release_group(tracker_name, release)
+            if banned:
+                plan.append({
+                    "tracker": tracker_name,
+                    "path": candidate,
+                    "release": release.to_dict(),
+                    "ids": ids,
+                    "queries": [query.__dict__ for query in queries],
+                    "status": "banned_group",
+                    "reason": f"banned_group:{banned_group}",
+                    "queue": False,
+                    "matched_result": None,
+                    "local_match": None,
+                    "query_results": [],
+                    "cache_hit": False,
+                })
+                if self.debug:
+                    console.print(f"[yellow]{tracker_name}: {release.basename} -> banned_group ({banned_group})[/yellow]")
+                continue
             if local_prefilter and home_releases:
                 local_exists, local_reason, local_match = self.matcher.local_duplicate_exists(
                     release,
@@ -375,6 +410,7 @@ class SearchRunner:
                         "tracker": tracker_name,
                         "path": candidate,
                         "release": release.to_dict(),
+                        "ids": ids,
                         "queries": [query.__dict__ for query in queries],
                         "status": "local_exists",
                         "reason": local_reason,
@@ -398,6 +434,7 @@ class SearchRunner:
                     "tracker": tracker_name,
                     "path": candidate,
                     "release": release.to_dict(),
+                    "ids": ids,
                     "queries": [query.__dict__ for query in queries],
                     "status": status,
                     "reason": cached_result.get("reason", "api_cache_hit"),
@@ -412,7 +449,7 @@ class SearchRunner:
                     console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} (api_cache_hit)[/{color}]")
                 continue
 
-            tracker_result = await self.provider.check_tracker(tracker_name, release, queries, content_profile)
+            tracker_result = await self.provider.check_tracker(tracker_name, release, queries, content_profile, ids)
             status = str(tracker_result.get("status") or "unknown")
             should_queue = status == "missing" or (status == "unknown" and include_unknown)
             if api_cache_enabled and self._should_cache_status(status, search_config, target):
@@ -421,6 +458,7 @@ class SearchRunner:
                 "tracker": tracker_name,
                 "path": candidate,
                 "release": release.to_dict(),
+                "ids": ids,
                 "queries": [query.__dict__ for query in queries],
                 "status": status,
                 "reason": tracker_result.get("reason"),
@@ -459,6 +497,24 @@ class SearchRunner:
             ttl_days = float(value)
         except (TypeError, ValueError):
             ttl_days = 30.0
+        return max(0.0, ttl_days)
+
+    def _tmdb_lookup_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
+        if "tmdb_lookup" in target:
+            return bool(target.get("tmdb_lookup"))
+        return bool(search_config.get("tmdb_lookup", True))
+
+    def _tmdb_cache_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
+        if "tmdb_cache" in target:
+            return bool(target.get("tmdb_cache"))
+        return bool(search_config.get("tmdb_cache", True))
+
+    def _tmdb_cache_ttl_days(self, search_config: dict[str, Any], target: dict[str, Any]) -> float:
+        value = target.get("tmdb_cache_ttl_days", search_config.get("tmdb_cache_ttl_days", 180))
+        try:
+            ttl_days = float(value)
+        except (TypeError, ValueError):
+            ttl_days = 180.0
         return max(0.0, ttl_days)
 
     def _api_cache_key(self, tracker_name: str, content_profile: str, release: ReleaseInfo) -> str:

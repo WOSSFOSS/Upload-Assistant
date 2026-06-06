@@ -988,6 +988,11 @@ config = {
         "api_cache": True,
         "api_cache_ttl_days": 30,
         "api_cache_unknown": False,
+        # Resolve TMDB/IMDb IDs before tracker searches when possible.
+        # This cache is tracker-independent and avoids repeating TMDB lookups for the same release.
+        "tmdb_lookup": True,
+        "tmdb_cache": True,
+        "tmdb_cache_ttl_days": 180,
         # Conservative matching keeps false positives low; later tracker API checks use this threshold for size comparisons.
         "match_mode": "conservative",
         "fuzzy_size_threshold": 0.02,
