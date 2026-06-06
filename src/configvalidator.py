@@ -698,6 +698,13 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                                 key=str(tracker),
                                 section="SEARCH"
                             ))
+                    content = target.get("content")
+                    if content is not None and str(content).lower() not in {"movie", "movies", "tv", "series", "show", "shows", "music", "audio", "book", "books", "ebook", "audiobook"}:
+                        warnings.append(ConfigValidationWarning(
+                            f"Target '{tracker}' content should be movie, tv, music, or book",
+                            key=str(tracker),
+                            section="SEARCH"
+                        ))
                     target_local_size_threshold = target.get("local_size_threshold")
                     if target_local_size_threshold is not None:
                         try:

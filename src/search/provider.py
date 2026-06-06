@@ -12,7 +12,13 @@ class SearchProvider:
         self.matcher = matcher
         self.debug = debug
 
-    async def check_tracker(self, tracker_name: str, release: ReleaseInfo, queries: list[SearchQuery]) -> dict[str, Any]:
+    async def check_tracker(
+        self,
+        tracker_name: str,
+        release: ReleaseInfo,
+        queries: list[SearchQuery],
+        content_profile: str = "movie",
+    ) -> dict[str, Any]:
         tracker_key = tracker_name.upper()
         tracker_class = tracker_class_map.get(tracker_key)
         if tracker_class is None:
@@ -28,7 +34,7 @@ class SearchProvider:
         query_log: list[dict[str, Any]] = []
 
         for query in queries:
-            meta = self._search_meta(tracker_key, release, query)
+            meta = self._search_meta(tracker_key, release, query, content_profile)
             try:
                 raw_results = await tracker.search_existing(meta, None)
             except Exception as e:
@@ -89,8 +95,10 @@ class SearchProvider:
             "results": all_results,
         }
 
-    def _search_meta(self, tracker_name: str, release: ReleaseInfo, query: SearchQuery) -> dict[str, Any]:
+    def _search_meta(self, tracker_name: str, release: ReleaseInfo, query: SearchQuery, content_profile: str) -> dict[str, Any]:
         ext = release.basename.rsplit(".", 1)[-1].lower() if "." in release.basename else ""
+        is_tv = content_profile == "tv"
+        is_disc = self._disc_type(release.path)
         return {
             "base_dir": self.base_dir,
             "path": release.path,
@@ -105,12 +113,12 @@ class SearchProvider:
             "debug": self.debug,
             "unattended": True,
             "unattended_confirm": False,
-            "category": "MOVIE",
+            "category": "TV" if is_tv else "MOVIE",
             "type": release.type or "ENCODE",
             "source": release.source or "",
             "resolution": release.resolution or "OTHER",
             "sd": 1 if release.resolution in {"480p", "480i", "576p", "576i"} else 0,
-            "is_disc": False,
+            "is_disc": is_disc,
             "is_music": False,
             "is_book": False,
             "filelist": [release.path],
@@ -121,13 +129,36 @@ class SearchProvider:
             "imdb": "0",
             "imdb_id": 0,
             "imdb_info": {},
-            "season": "",
+            "season": self._season(release.release_name) if is_tv else "",
             "episode": "",
-            "tv_pack": 0,
+            "tv_pack": 1 if is_tv else 0,
             "valid_mi_settings": True,
             "keywords": "",
             "combined_genres": "",
         }
+
+    def _disc_type(self, path: str) -> str | bool:
+        from pathlib import Path
+
+        path_obj = Path(path)
+        if not path_obj.is_dir():
+            return False
+        if (path_obj / "BDMV" / "index.bdmv").exists() or (path_obj / "BDMV" / "BACKUP" / "index.bdmv").exists():
+            return "BDMV"
+        if (path_obj / "VIDEO_TS" / "VIDEO_TS.IFO").exists():
+            return "DVD"
+        return False
+
+    def _season(self, release_name: str) -> str:
+        import re
+
+        match = re.search(r"(?i)(?:^|[.\s_-])s(\d{1,2})(?:[.\s_-]|$)", release_name)
+        if match:
+            return f"S{int(match.group(1)):02d}"
+        match = re.search(r"(?i)season[.\s_-]?(\d{1,2})", release_name)
+        if match:
+            return f"S{int(match.group(1)):02d}"
+        return ""
 
     def _coerce_results(self, raw_results: Any) -> list[dict[str, Any]]:
         if raw_results in (None, False):

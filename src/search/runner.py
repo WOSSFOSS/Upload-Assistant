@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import shutil
 from pathlib import Path
 from typing import Any, Optional
@@ -13,6 +14,12 @@ VIDEO_EXTENSIONS = {".mkv", ".mp4", ".ts", ".avi", ".mov", ".m2ts"}
 MUSIC_EXTENSIONS = {".flac", ".mp3", ".m4a", ".aac", ".alac", ".wav", ".ogg", ".opus"}
 BOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".lit", ".cbz", ".cbr", ".m4b"}
 SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS | MUSIC_EXTENSIONS | BOOK_EXTENSIONS
+EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}e\d{1,3}|s\d{1,2}e\d{1,3}e\d{1,3}|\d{1,2}x\d{1,3})(?:[.\s_\-]|$)")
+SEASON_PACK_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}|season[.\s_\-]?\d{1,2}|complete)(?:[.\s_\-]|$)")
+DISC_MARKERS = {
+    "BDMV": {"BDMV/index.bdmv", "BDMV/BACKUP/index.bdmv"},
+    "DVD": {"VIDEO_TS/VIDEO_TS.IFO"},
+}
 
 
 class SearchRunner:
@@ -76,16 +83,17 @@ class SearchRunner:
                     console.print(f"[yellow]{tracker_name}: no source paths configured.[/yellow]")
                     continue
 
-                candidates = self._scan_paths(source_paths)
+                content_profile = self._content_profile(name, target)
+                candidates = self._scan_paths(source_paths, content_profile)
                 home_releases: list[ReleaseInfo] = []
                 if self._local_prefilter_enabled(search_config, target):
                     home_paths = self._resolve_home_paths(target, libraries_map)
-                    home_candidates = self._scan_paths(home_paths) if home_paths else []
+                    home_candidates = self._scan_paths(home_paths, content_profile) if home_paths else []
                     home_releases = [self.matcher.parse_release(candidate) for candidate in home_candidates]
                     if self.debug:
                         console.print(f"[cyan]{tracker_name}:[/cyan] local prefilter loaded {len(home_releases)} home file(s)")
 
-                search_plan = await self._execute_search_plan(candidates, tracker_name, target, search_config, home_releases)
+                search_plan = await self._execute_search_plan(candidates, tracker_name, target, search_config, home_releases, content_profile)
                 cache_file = cache_dir / f"{tracker_name.lower()}_{name}_search_plan.json"
                 await self._write_json(cache_file, search_plan)
                 queue_source_candidates = [
@@ -166,7 +174,7 @@ class SearchRunner:
             values = []
         return [Path(item).expanduser() for item in values if item.strip()]
 
-    def _scan_paths(self, paths: list[Path]) -> list[str]:
+    def _scan_paths(self, paths: list[Path], content_profile: str = "generic") -> list[str]:
         candidates: list[str] = []
         seen: set[str] = set()
         for path in paths:
@@ -174,21 +182,119 @@ class SearchRunner:
                 console.print(f"[yellow]Search path not found: {path}[/yellow]")
                 continue
             if path.is_file():
-                self._add_candidate(path, candidates, seen)
+                self._add_candidate(path, candidates, seen, content_profile)
                 continue
-            for item in sorted(path.rglob("*"), key=lambda p: os.fspath(p).lower()):
-                if item.is_file():
-                    self._add_candidate(item, candidates, seen)
+            if path.is_dir():
+                self._scan_directory(path, candidates, seen, content_profile)
         return candidates
 
-    def _add_candidate(self, path: Path, candidates: list[str], seen: set[str]) -> None:
-        if path.suffix.lower() not in SUPPORTED_EXTENSIONS:
+    def _scan_directory(self, root: Path, candidates: list[str], seen: set[str], content_profile: str) -> None:
+        if self._add_disc_candidate(root, candidates, seen):
             return
+
+        season_pack_dirs = self._season_pack_dirs(root) if content_profile == "tv" else set()
+        if content_profile == "tv":
+            for pack_dir in sorted(season_pack_dirs, key=lambda p: os.fspath(p).lower()):
+                self._add_path_candidate(pack_dir, candidates, seen)
+            return
+
+        skipped_disc_roots: set[Path] = set()
+        for item in sorted(root.rglob("*"), key=lambda p: os.fspath(p).lower()):
+            if any(item == disc_root or disc_root in item.parents for disc_root in skipped_disc_roots):
+                continue
+            if item.is_dir() and self._add_disc_candidate(item, candidates, seen):
+                skipped_disc_roots.add(item)
+                continue
+            if item.is_file():
+                self._add_candidate(item, candidates, seen, content_profile)
+
+    def _add_candidate(self, path: Path, candidates: list[str], seen: set[str], content_profile: str = "generic") -> None:
+        suffix = path.suffix.lower()
+        if content_profile == "movie":
+            if suffix not in VIDEO_EXTENSIONS or self._is_episode_name(path.name):
+                return
+        elif content_profile == "tv":
+            if suffix not in VIDEO_EXTENSIONS or not self._is_season_pack_name(path.name):
+                return
+        elif content_profile == "music":
+            if suffix not in MUSIC_EXTENSIONS:
+                return
+        elif content_profile == "book":
+            if suffix not in BOOK_EXTENSIONS:
+                return
+        elif suffix not in SUPPORTED_EXTENSIONS:
+            return
+        self._add_path_candidate(path, candidates, seen)
+
+    def _add_path_candidate(self, path: Path, candidates: list[str], seen: set[str]) -> None:
         resolved = os.fspath(path.resolve())
         if resolved in seen:
             return
         candidates.append(resolved)
         seen.add(resolved)
+
+    def _add_disc_candidate(self, path: Path, candidates: list[str], seen: set[str]) -> bool:
+        if not path.is_dir() or not self._is_disc_root(path):
+            return False
+        self._add_path_candidate(path, candidates, seen)
+        return True
+
+    def _is_disc_root(self, path: Path) -> bool:
+        for marker_set in DISC_MARKERS.values():
+            for marker in marker_set:
+                if (path / marker).exists():
+                    return True
+        return False
+
+    def _season_pack_dirs(self, root: Path) -> set[Path]:
+        pack_dirs: set[Path] = set()
+        for directory in [root, *[item for item in root.rglob("*") if item.is_dir()]]:
+            if self._is_disc_root(directory):
+                continue
+            video_files = [
+                item for item in directory.iterdir()
+                if item.is_file()
+                and item.suffix.lower() in VIDEO_EXTENSIONS
+                and self._is_episode_name(item.name)
+            ]
+            if len(video_files) >= 2 and (self._is_season_pack_name(directory.name) or self._has_single_season(video_files)):
+                pack_dirs.add(directory)
+        return pack_dirs
+
+    def _has_single_season(self, paths: list[Path]) -> bool:
+        seasons: set[str] = set()
+        for path in paths:
+            match = re.search(r"(?i)s(\d{1,2})e\d{1,3}", path.name)
+            if match:
+                seasons.add(match.group(1).zfill(2))
+        return len(seasons) == 1
+
+    def _is_episode_name(self, name: str) -> bool:
+        return bool(EPISODE_RE.search(name))
+
+    def _is_season_pack_name(self, name: str) -> bool:
+        return bool(SEASON_PACK_RE.search(name)) and not self._is_episode_name(name)
+
+    def _content_profile(self, profile_name: str, target: dict[str, Any]) -> str:
+        configured = str(target.get("content") or target.get("category") or "").strip().lower()
+        if configured:
+            if configured in {"movie", "movies"}:
+                return "movie"
+            if configured in {"tv", "series", "show", "shows"}:
+                return "tv"
+            if configured in {"music", "audio"}:
+                return "music"
+            if configured in {"book", "books", "ebook", "audiobook"}:
+                return "book"
+
+        normalized = profile_name.lower()
+        if any(term in normalized for term in ("tv", "series", "show")):
+            return "tv"
+        if "music" in normalized:
+            return "music"
+        if any(term in normalized for term in ("book", "ebook", "audiobook")):
+            return "book"
+        return "movie"
 
     def _materialize_candidates(self, candidates: list[str], target: dict[str, Any], tracker_name: str) -> list[str]:
         linking = str(target.get("linking") or "").strip().lower()
@@ -231,6 +337,7 @@ class SearchRunner:
         target: dict[str, Any],
         search_config: dict[str, Any],
         home_releases: list[ReleaseInfo],
+        content_profile: str,
     ) -> list[dict[str, Any]]:
         plan: list[dict[str, Any]] = []
         include_unknown = bool(target.get("queue_unknown", True))
@@ -263,7 +370,7 @@ class SearchRunner:
                         console.print(f"[yellow]{tracker_name}: {release.basename} -> local_exists ({local_reason}: {match_name})[/yellow]")
                     continue
 
-            tracker_result = await self.provider.check_tracker(tracker_name, release, queries)
+            tracker_result = await self.provider.check_tracker(tracker_name, release, queries, content_profile)
             status = str(tracker_result.get("status") or "unknown")
             should_queue = status == "missing" or (status == "unknown" and include_unknown)
             plan.append({

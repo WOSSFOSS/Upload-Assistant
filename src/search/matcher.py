@@ -67,8 +67,8 @@ class SearchMatcher:
     def parse_release(self, path: str) -> ReleaseInfo:
         path_obj = Path(path)
         basename = path_obj.name
-        release_name = path_obj.stem
-        size = path_obj.stat().st_size if path_obj.exists() and path_obj.is_file() else 0
+        release_name = self._release_name_from_path(path_obj)
+        size = self._path_size(path_obj)
         group = self._parse_group(release_name)
         year = self._parse_year(release_name)
         resolution = self._parse_resolution(release_name)
@@ -245,6 +245,32 @@ class SearchMatcher:
         title_part = re.sub(r"-(?P<group>[A-Za-z0-9][A-Za-z0-9._-]{1,20})$", "", title_part)
         title_part = self.humanize(title_part)
         return title_part.strip()
+
+    def _release_name_from_path(self, path_obj: Path) -> str:
+        if path_obj.exists() and path_obj.is_dir():
+            return path_obj.name
+        return re.sub(
+            r"\.(mkv|mp4|ts|avi|mov|m2ts|flac|mp3|m4a|aac|alac|wav|ogg|opus|epub|pdf|mobi|azw3|lit|cbz|cbr|m4b)$",
+            "",
+            path_obj.name,
+            flags=re.IGNORECASE,
+        )
+
+    def _path_size(self, path_obj: Path) -> int:
+        if not path_obj.exists():
+            return 0
+        if path_obj.is_file():
+            return path_obj.stat().st_size
+        if path_obj.is_dir():
+            total = 0
+            for item in path_obj.rglob("*"):
+                if item.is_file():
+                    try:
+                        total += item.stat().st_size
+                    except OSError:
+                        continue
+            return total
+        return 0
 
     def _size_matches(self, release_size: int, result: dict[str, Any]) -> bool:
         result_size = result.get("size") or result.get("file_size") or result.get("filesize") or result.get("bytes")

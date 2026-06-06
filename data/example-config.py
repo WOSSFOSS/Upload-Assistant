@@ -986,11 +986,13 @@ config = {
         "match_mode": "conservative",
         "fuzzy_size_threshold": 0.02,
         # Local pre-filtering compares source files against the target tracker's own local library first.
+        # To use this you need to set a home_library for the target tracker in the PROFILES section below, and you may optionally set source_libraries to pre-filter against specific libraries instead of the entire local collection.
         # This avoids API searches and queue entries for files that are already present locally.
         "local_prefilter": True,
         "local_size_threshold": 0.02,
 
         # Define reusable content libraries. Targets below can reference these names instead of repeating paths.
+        # Path need to be set as UA is seeing them.
         "libraries": {
             # "bhd_movies": ["/media/bhd/movies"],
             # "gpw_movies": ["/media/gpw/movies"],
@@ -1004,6 +1006,7 @@ config = {
                 "targets": {
                     # Search GPW/MTV libraries for content that may be uploaded to BHD.
                     "BHD": {
+                        "content": "movie",
                         "source_libraries": ["gpw_movies", "mtv_movies"],
                         "source_paths": [],
                         "home_libraries": ["bhd_movies"],
@@ -1017,6 +1020,7 @@ config = {
                     },
                     # Search BHD/MTV libraries for content that may be uploaded to GPW.
                     "GPW": {
+                        "content": "movie",
                         "source_libraries": ["bhd_movies", "mtv_movies"],
                         "source_paths": [],
                         "home_libraries": ["gpw_movies"],
@@ -1034,6 +1038,7 @@ config = {
                 "enabled": False,
                 "targets": {
                     "ZNTH": {
+                        "content": "music",
                         "source_libraries": [],
                         "source_paths": [],
                         "home_libraries": ["znth_music"],
