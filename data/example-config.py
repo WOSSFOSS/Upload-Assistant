@@ -17,6 +17,10 @@ config = {
         "google_books_api_key": "",
         # Optional Open Library User-Agent override for book/audiobook metadata lookup.
         "open_library_user_agent": "",
+        # Optional Audible lookup for audiobook metadata and links.
+        "audible_lookup": True,
+        # Audible marketplace TLD, e.g. com, co.uk, de, fr.
+        "audible_marketplace": "com",
 
         # Play the bell sound effect when asking for confirmation
         "sfx_on_prompt": True,

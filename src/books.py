@@ -26,6 +26,7 @@ AUDIOBOOK_FORMAT_PRIORITY = [".m4b", ".mp3", ".m4a", ".aac", ".flac", ".opus", "
 BOOK_LINK_ICONS = {
     "Google Books": "https://www.google.com/s2/favicons?domain=books.google.com&sz=32",
     "Open Library": "https://www.google.com/s2/favicons?domain=openlibrary.org&sz=32",
+    "Audible": "https://www.google.com/s2/favicons?domain=audible.com&sz=32",
     "MyAnonamouse": "https://www.google.com/s2/favicons?domain=myanonamouse.net&sz=32",
 }
 
@@ -93,6 +94,10 @@ def _clean_text(value: str) -> str:
 
 def _clean_isbn(value: str) -> str:
     return re.sub(r"[-\s]", "", value or "").upper()
+
+
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
 def _validate_isbn(value: str) -> str:
@@ -197,9 +202,9 @@ class BookProcessor:
 
         if is_audiobook:
             duration_seconds, duration_display = await self._audiobook_duration(book_files)
-            bitrate = await self._audiobook_bitrate(book_files)
+            bitrate, bitrate_mode = await self._audiobook_bitrate_info(book_files)
         else:
-            duration_seconds, duration_display, bitrate = 0, "", None
+            duration_seconds, duration_display, bitrate, bitrate_mode = 0, "", None, ""
 
         meta.update({
             "is_book": True,
@@ -244,6 +249,7 @@ class BookProcessor:
             "audiobook_duration": duration_seconds,
             "audiobook_duration_formatted": duration_display,
             "audiobook_bitrate": bitrate,
+            "audiobook_bitrate_mode": bitrate_mode,
             "retail": bool(meta.get("retail", False)),
             "scan": bool(meta.get("scan", False)),
             "ocr": bool(meta.get("ocr", False)),
@@ -262,6 +268,11 @@ class BookProcessor:
             "base_torrent_created": False,
             "we_checked_them_all": False,
         })
+
+        if is_audiobook and self.config.get("DEFAULT", {}).get("audible_lookup", True):
+            audible_metadata = await self._audible_lookup(meta)
+            self._apply_metadata(meta, audible_metadata or {}, overwrite=False)
+            self._apply_cli_overrides(meta)
 
         await self._write_description(meta)
         return meta
@@ -692,6 +703,146 @@ class BookProcessor:
         metadata["google_books_link_source"] = "api"
         return {key: value for key, value in metadata.items() if value}
 
+    async def _audible_lookup(self, meta: dict[str, Any]) -> Optional[dict[str, Any]]:
+        title = _mi_value(meta.get("title"))
+        author = _mi_value(meta.get("author"))
+        if not title:
+            return None
+        marketplace = str(self.config.get("DEFAULT", {}).get("audible_marketplace", "com") or "com").strip().lower()
+        marketplace = re.sub(r"[^a-z.]", "", marketplace) or "com"
+        cache_key = _slug(" ".join(part for part in [title, author, marketplace] if part))
+        cache_dir = Path(meta["base_dir"]) / "tmp" / "audible_cache"
+        cache_file = cache_dir / f"{cache_key}.json"
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        data: Optional[dict[str, Any]] = None
+        if cache_file.exists():
+            with contextlib.suppress(Exception):
+                async with aiofiles.open(cache_file, encoding="utf-8") as f:
+                    cached = json.loads(await f.read())
+                    data = cached if isinstance(cached, dict) else None
+        if data is None:
+            params = {
+                "title": title,
+                "num_results": 5,
+                "products_sort_by": "Relevance",
+                "image_sizes": "500",
+                "response_groups": "contributors,media,product_attrs,product_desc,product_extended_attrs,series",
+            }
+            if author and author.lower() != "unknown author":
+                params["author"] = author
+            try:
+                async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers={"User-Agent": self.user_agent}) as client:
+                    response = await client.get(f"https://api.audible.{marketplace}/1.0/catalog/products", params=params)
+                    response.raise_for_status()
+                    data = response.json()
+                async with aiofiles.open(cache_file, "w", encoding="utf-8") as f:
+                    await f.write(json.dumps(data, indent=2))
+            except Exception as e:
+                if meta.get("debug"):
+                    console.print(f"[yellow]Audible lookup failed for {title}: {e}[/yellow]")
+                return None
+        return self._parse_audible(data, title, author, marketplace)
+
+    def _parse_audible(self, data: dict[str, Any], title: str, author: str, marketplace: str) -> Optional[dict[str, Any]]:
+        products = data.get("products") if isinstance(data, dict) else None
+        if not isinstance(products, list) or not products:
+            return None
+        product = self._best_audible_product(products, title, author)
+        if not product:
+            return None
+
+        metadata: dict[str, Any] = {}
+        product_title = _mi_value(product.get("title"))
+        subtitle = _mi_value(product.get("subtitle"))
+        metadata["title"] = f"{product_title}: {subtitle}" if product_title and subtitle else product_title
+        authors = self._audible_names(product, "authors", role="author")
+        narrators = self._audible_names(product, "narrators", role="narrator")
+        metadata["author"] = ", ".join(authors)
+        metadata["narrator"] = ", ".join(narrators)
+        metadata["publisher"] = _mi_value(product.get("publisher_name"), product.get("publisher"))
+        metadata["year"] = self._extract_year(_mi_value(product.get("release_date"), product.get("issue_date")))
+        metadata["overview"] = _clean_text(_mi_value(
+            product.get("publisher_summary"),
+            product.get("editorial_reviews"),
+            product.get("merchandising_summary"),
+            product.get("description"),
+        ))
+        language = _mi_value(product.get("language"), product.get("content_language"))
+        if language:
+            full, iso = _resolve_language(language)
+            if _is_valid_language(full, iso):
+                metadata["book_language"] = full
+                metadata["book_language_iso"] = iso
+        runtime = product.get("runtime_length_min")
+        with contextlib.suppress(TypeError, ValueError):
+            runtime_seconds = int(float(runtime) * 60)
+            if runtime_seconds > 0:
+                metadata["audiobook_duration"] = runtime_seconds
+                metadata["audiobook_duration_formatted"] = _duration_string(runtime_seconds)
+        images = product.get("product_images")
+        if isinstance(images, dict):
+            metadata["poster"] = _mi_value(images.get("500"), images.get("1215"), images.get("882"), images.get("500x500"))
+        asin = _mi_value(product.get("asin"))
+        if asin:
+            metadata["audible_asin"] = asin
+            metadata["audible_link"] = f"https://www.audible.{marketplace}/pd/{asin}"
+        abridgement = " ".join(
+            _mi_value(product.get(key))
+            for key in ("abridgement", "format_type", "content_delivery_type", "runtime_length", "thesaurus_subject_keywords")
+        ).lower()
+        if "unabridged" in abridgement:
+            metadata["unabridged"] = True
+        elif "abridged" in abridgement:
+            metadata["abridged"] = True
+        return {key: value for key, value in metadata.items() if value not in (None, "", [])}
+
+    def _best_audible_product(self, products: list[Any], title: str, author: str) -> Optional[dict[str, Any]]:
+        normalized_title = _slug(title).replace("-", "")
+        normalized_author = _slug(author).replace("-", "")
+        best: Optional[dict[str, Any]] = None
+        best_score = -1
+        for product in products:
+            if not isinstance(product, dict):
+                continue
+            product_title = _slug(_mi_value(product.get("title"))).replace("-", "")
+            authors = " ".join(self._audible_names(product, "authors", role="author"))
+            product_author = _slug(authors).replace("-", "")
+            score = 0
+            if normalized_title and product_title == normalized_title:
+                score += 4
+            elif normalized_title and (normalized_title in product_title or product_title in normalized_title):
+                score += 2
+            if normalized_author and product_author and normalized_author in product_author:
+                score += 3
+            if score > best_score:
+                best = product
+                best_score = score
+        return best if best_score > 0 else None
+
+    def _audible_names(self, product: dict[str, Any], key: str, role: str = "") -> list[str]:
+        values = product.get(key)
+        names: list[str] = []
+        if isinstance(values, list):
+            for value in values:
+                if isinstance(value, dict):
+                    name = _mi_value(value.get("name"))
+                else:
+                    name = _mi_value(value)
+                if name:
+                    names.append(name)
+        contributors = product.get("contributors")
+        if isinstance(contributors, list):
+            for contributor in contributors:
+                if not isinstance(contributor, dict):
+                    continue
+                contributor_role = _mi_value(contributor.get("role"), contributor.get("type")).lower()
+                if role and role not in contributor_role:
+                    continue
+                name = _mi_value(contributor.get("name"))
+                if name:
+                    names.append(name)
+        return list(dict.fromkeys(names))
+
     async def _parse_mediainfo(self, path: Path) -> dict[str, Any]:
         def parse() -> dict[str, Any]:
             media_info_json = MediaInfo.parse(os.fspath(path), output="JSON")
@@ -736,18 +887,39 @@ class BookProcessor:
                 total_seconds += duration
         return total_seconds, _duration_string(total_seconds) if total_seconds else ""
 
-    async def _audiobook_bitrate(self, files: list[Path]) -> Optional[int]:
+    async def _audiobook_bitrate_info(self, files: list[Path]) -> tuple[Optional[int], str]:
         audio_files = [file for file in files if file.suffix.lower() in AUDIOBOOK_EXTENSIONS][:5]
         bitrates: list[int] = []
+        modes: list[str] = []
         for file in audio_files:
             mediainfo = await self._parse_mediainfo(file)
             audio = self._first_track(mediainfo, "Audio")
             general = self._first_track(mediainfo, "General")
             bitrate = _mi_value(audio.get("BitRate"), general.get("OverallBitRate"))
+            mode = self._bitrate_mode(audio, general)
+            if mode:
+                modes.append(mode)
             with contextlib.suppress(ValueError):
                 value = int(float(bitrate))
                 bitrates.append(int(value / 1000) if value >= 1000 else value)
-        return int(sum(bitrates) / len(bitrates)) if bitrates else None
+        bitrate = int(sum(bitrates) / len(bitrates)) if bitrates else None
+        mode = "VBR" if any(item == "VBR" for item in modes) else "CBR" if any(item == "CBR" for item in modes) else ""
+        return bitrate, mode
+
+    def _bitrate_mode(self, audio: dict[str, Any], general: dict[str, Any]) -> str:
+        raw = _mi_value(
+            audio.get("BitRate_Mode"),
+            audio.get("BitRate_Mode/String"),
+            audio.get("BitRate_Mode_String"),
+            general.get("OverallBitRate_Mode"),
+            general.get("OverallBitRate_Mode/String"),
+            general.get("OverallBitRate_Mode_String"),
+        ).lower()
+        if "variable" in raw or raw == "vbr":
+            return "VBR"
+        if "constant" in raw or raw == "cbr":
+            return "CBR"
+        return ""
 
     def _first_track(self, mediainfo: dict[str, Any], track_type: str) -> dict[str, Any]:
         tracks = mediainfo.get("media", {}).get("track") if isinstance(mediainfo, dict) else []
@@ -816,9 +988,16 @@ class BookProcessor:
             ("Format", self._book_format_display(meta)),
             ("Release", self._book_release_flags(meta)),
             ("Duration", meta.get("audiobook_duration_formatted")),
-            ("Bitrate", f"{meta.get('audiobook_bitrate')} kb/s" if meta.get("audiobook_bitrate") else ""),
+            ("Bitrate", self._audiobook_bitrate_display(meta)),
         ]
         return [f"{label}: {value}" for label, value in info if _mi_value(value)]
+
+    def _audiobook_bitrate_display(self, meta: dict[str, Any]) -> str:
+        bitrate = meta.get("audiobook_bitrate")
+        if not bitrate:
+            return ""
+        mode = _mi_value(meta.get("audiobook_bitrate_mode"))
+        return f"{bitrate} kb/s {mode}".strip()
 
     def _book_format_display(self, meta: dict[str, Any]) -> str:
         formats = meta.get("book_formats")
@@ -846,6 +1025,8 @@ class BookProcessor:
             links.append(self._book_link_line("Google Books", str(meta["google_books_link"])))
         if meta.get("open_library_link"):
             links.append(self._book_link_line("Open Library", str(meta["open_library_link"])))
+        if meta.get("audible_link"):
+            links.append(self._book_link_line("Audible", str(meta["audible_link"])))
         if meta.get("mam_link"):
             links.append(self._book_link_line("MyAnonamouse", str(meta["mam_link"])))
         return links
