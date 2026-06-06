@@ -3,9 +3,13 @@ import itertools
 import os
 import re
 import shutil
+import sqlite3
 import time
+import urllib.parse
 from pathlib import Path
 from typing import Any, Optional
+
+from torf import Torrent
 
 from src.console import console
 from src.search.matcher import ReleaseInfo, SearchMatcher
@@ -86,6 +90,7 @@ class SearchRunner:
             console.print(f"[cyan]Search target filter:[/cyan] {', '.join(sorted(selected_targets))}")
 
         total_written = 0
+        scan_memory_cache: dict[tuple[str, tuple[str, ...]], list[str]] = {}
         for name, profile in selected_profiles.items():
             if not isinstance(profile, dict):
                 continue
@@ -147,11 +152,12 @@ class SearchRunner:
                     )
                 else:
                     console.print(f"[cyan]{tracker_name}:[/cyan] scanning source libraries for {content_profile} candidates...")
-                    candidates = self._scan_paths(
+                    candidates = self._scan_paths_cached(
                         source_paths,
                         content_profile,
                         label=f"{tracker_name} source",
                         progress_interval=progress_interval,
+                        scan_memory_cache=scan_memory_cache,
                     )
                     console.print(f"[cyan]{tracker_name}:[/cyan] found {len(candidates)} source candidate(s)")
                     await self._write_scan_checkpoint(
@@ -168,11 +174,12 @@ class SearchRunner:
                         home_paths = self._resolve_home_paths(target, libraries_map)
                         if home_paths:
                             console.print(f"[cyan]{tracker_name}:[/cyan] scanning target home libraries for local prefilter...")
-                            home_candidates = self._scan_paths(
+                            home_candidates = self._scan_paths_cached(
                                 home_paths,
                                 content_profile,
                                 label=f"{tracker_name} home",
                                 progress_interval=progress_interval,
+                                scan_memory_cache=scan_memory_cache,
                             )
                     home_releases = [self.matcher.parse_release(candidate) for candidate in home_candidates]
                     console.print(f"[cyan]{tracker_name}:[/cyan] local prefilter loaded {len(home_releases)} home candidate(s)")
@@ -323,6 +330,33 @@ class SearchRunner:
             if path.is_dir():
                 scanned += self._scan_directory(path, candidates, seen, content_profile, label, progress_interval)
         return candidates
+
+    def _scan_paths_cached(
+        self,
+        paths: list[Path],
+        content_profile: str,
+        label: str,
+        progress_interval: int,
+        scan_memory_cache: dict[tuple[str, tuple[str, ...]], list[str]],
+    ) -> list[str]:
+        cache_key = self._scan_memory_cache_key(paths, content_profile)
+        cached = scan_memory_cache.get(cache_key)
+        if cached is not None:
+            console.print(f"[dim]{label}: using in-run scan cache with {len(cached)} candidate(s)[/dim]")
+            return list(cached)
+
+        candidates = self._scan_paths(paths, content_profile, label, progress_interval)
+        scan_memory_cache[cache_key] = list(candidates)
+        return candidates
+
+    def _scan_memory_cache_key(self, paths: list[Path], content_profile: str) -> tuple[str, tuple[str, ...]]:
+        normalized_paths: list[str] = []
+        for path in paths:
+            try:
+                normalized_paths.append(os.fspath(path.expanduser().resolve()))
+            except OSError:
+                normalized_paths.append(os.fspath(path.expanduser()))
+        return content_profile, tuple(sorted(normalized_paths))
 
     def _scan_directory(
         self,
@@ -527,6 +561,7 @@ class SearchRunner:
         include_unknown = bool(target.get("queue_unknown", True))
         local_prefilter = self._local_prefilter_enabled(search_config, target)
         local_size_threshold = self._local_size_threshold(search_config, target)
+        torrent_index_prefilter = self._torrent_index_prefilter_enabled(search_config, target)
         api_cache_enabled = self._api_cache_enabled(search_config, target)
         api_cache_ttl_days = self._api_cache_ttl_days(search_config, target)
         tmdb_lookup = self._tmdb_lookup_enabled(search_config, target)
@@ -581,6 +616,39 @@ class SearchRunner:
                     tracker_name,
                 )
                 continue
+            if torrent_index_prefilter:
+                client_exists, client_reason = self._torrent_index_candidate_exists(release, tracker_name, search_config, target)
+                if client_exists:
+                    plan.append({
+                        "tracker": tracker_name,
+                        "path": candidate,
+                        "release": release.to_dict(),
+                        "ids": ids,
+                        "queries": [query.__dict__ for query in queries],
+                        "status": "client_exists",
+                        "reason": client_reason,
+                        "queue": False,
+                        "matched_result": None,
+                        "local_match": None,
+                        "query_results": [],
+                        "cache_hit": False,
+                    })
+                    if self.debug:
+                        console.print(f"[yellow]{tracker_name}: {release.basename} -> client_exists ({client_reason})[/yellow]")
+                    await self._checkpoint_search_progress(
+                        index,
+                        checkpoint_interval,
+                        cache_file,
+                        plan,
+                        api_cache_file,
+                        api_cache,
+                        tmdb_cache_file,
+                        tmdb_cache,
+                        search_config,
+                        target,
+                        tracker_name,
+                    )
+                    continue
             if local_prefilter and home_releases:
                 local_exists, local_reason, local_match = self.matcher.local_duplicate_exists(
                     release,
@@ -716,6 +784,116 @@ class SearchRunner:
         except (TypeError, ValueError):
             threshold = self.matcher.fuzzy_size_threshold
         return max(0.0, min(threshold, 0.25))
+
+    def _torrent_index_prefilter_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
+        if "torrent_index_prefilter" in target:
+            return bool(target.get("torrent_index_prefilter"))
+        return bool(search_config.get("torrent_index_prefilter", True))
+
+    def _torrent_index_path(self, search_config: dict[str, Any], target: dict[str, Any]) -> Path:
+        value = str(target.get("torrent_index_path") or search_config.get("torrent_index_path") or "tmp/torrent_file_index.sqlite")
+        return self._resolve_data_path(value)
+
+    def _torrent_index_candidate_exists(
+        self,
+        release: ReleaseInfo,
+        tracker_name: str,
+        search_config: dict[str, Any],
+        target: dict[str, Any],
+    ) -> tuple[bool, str]:
+        db_path = self._torrent_index_path(search_config, target)
+        if not db_path.exists():
+            return False, "torrent_index_missing"
+        tracker_hosts = self._tracker_announce_hosts(tracker_name)
+        if not tracker_hosts:
+            return False, "tracker_announce_missing"
+        try:
+            conn = sqlite3.connect(db_path)
+            conn.row_factory = sqlite3.Row
+        except sqlite3.Error:
+            return False, "torrent_index_open_failed"
+        try:
+            file_count, file_basenames, torrent_name = self._torrent_index_match_values(release)
+            rows = conn.execute(
+                """
+                SELECT * FROM torrent_file_index
+                WHERE (file_count = ? AND file_basenames = ?)
+                   OR LOWER(torrent_name) = ?
+                """,
+                (file_count, file_basenames, torrent_name),
+            ).fetchall()
+        except sqlite3.Error:
+            return False, "torrent_index_query_failed"
+        finally:
+            conn.close()
+
+        release_size = int(release.size or 0)
+        for row in rows:
+            if not self._torrent_index_row_is_current(row):
+                continue
+            try:
+                total_size = int(row["total_size"])
+            except (TypeError, ValueError):
+                total_size = 0
+            if release_size and total_size and not self.matcher._size_values_match(release_size, total_size, size_threshold=0.02):
+                continue
+            torrent_path = str(row["path"])
+            if self._torrent_file_has_tracker(torrent_path, tracker_hosts):
+                return True, f"torrent_index_tracker_match:{str(row['infohash'])}"
+        return False, "no_torrent_index_tracker_match"
+
+    def _torrent_index_match_values(self, release: ReleaseInfo) -> tuple[int, str, str]:
+        path = Path(release.path)
+        if path.exists() and path.is_file():
+            file_basenames = [path.name.lower()]
+            torrent_name = path.stem.lower()
+        elif path.exists() and path.is_dir():
+            file_basenames = sorted(item.name.lower() for item in path.rglob("*") if item.is_file())
+            torrent_name = path.name.lower()
+        else:
+            file_basenames = [release.basename.lower()] if release.basename else []
+            torrent_name = release.release_name.lower()
+        return len(file_basenames), json.dumps(file_basenames, separators=(",", ":")), torrent_name
+
+    def _torrent_index_row_is_current(self, row: sqlite3.Row) -> bool:
+        try:
+            stat = os.stat(str(row["path"]))
+            return int(row["mtime_ns"]) == stat.st_mtime_ns and int(row["file_size"]) == stat.st_size
+        except (OSError, TypeError, ValueError):
+            return False
+
+    def _tracker_announce_hosts(self, tracker_name: str) -> set[str]:
+        tracker_config = self.config.get("TRACKERS", {}).get(tracker_name.upper(), {})
+        announce = str(tracker_config.get("announce_url") or "").strip()
+        host = urllib.parse.urlparse(announce).hostname if announce else ""
+        return {host.lower()} if host else set()
+
+    def _torrent_file_has_tracker(self, torrent_path: str, tracker_hosts: set[str]) -> bool:
+        try:
+            torrent = Torrent.read(torrent_path)
+        except Exception:
+            return False
+        urls: list[str] = []
+        metainfo = getattr(torrent, "metainfo", {})
+        if isinstance(metainfo, dict):
+            announce = metainfo.get("announce")
+            if announce:
+                urls.append(str(announce))
+            announce_list = metainfo.get("announce-list")
+            if isinstance(announce_list, list):
+                for tier in announce_list:
+                    if isinstance(tier, list):
+                        urls.extend(str(item) for item in tier if item)
+                    elif tier:
+                        urls.append(str(tier))
+        for tracker_url in urls:
+            host = urllib.parse.urlparse(tracker_url).hostname
+            if host and self._host_matches_any(host.lower(), tracker_hosts):
+                return True
+        return False
+
+    def _host_matches_any(self, host: str, tracker_hosts: set[str]) -> bool:
+        return any(host == tracker_host or host.endswith(f".{tracker_host}") for tracker_host in tracker_hosts)
 
     def _api_cache_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
         if "api_cache" in target:

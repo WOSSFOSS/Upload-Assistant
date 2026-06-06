@@ -605,6 +605,14 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                 section="SEARCH"
             ))
 
+    torrent_index_path = search.get("torrent_index_path")
+    if torrent_index_path is not None and not isinstance(torrent_index_path, str):
+        warnings.append(ConfigValidationWarning(
+            "'torrent_index_path' should be a string path",
+            key="torrent_index_path",
+            section="SEARCH"
+        ))
+
     match_mode = search.get("match_mode")
     if match_mode and str(match_mode).lower() not in {"conservative", "balanced"}:
         warnings.append(ConfigValidationWarning(
@@ -764,6 +772,13 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                                 key=str(tracker),
                                 section="SEARCH"
                             ))
+                    target_torrent_index_path = target.get("torrent_index_path")
+                    if target_torrent_index_path is not None and not isinstance(target_torrent_index_path, str):
+                        warnings.append(ConfigValidationWarning(
+                            f"Target '{tracker}' torrent_index_path should be a string path",
+                            key=str(tracker),
+                            section="SEARCH"
+                        ))
                     content = target.get("content")
                     if content is not None and str(content).lower() not in {"movie", "movies", "tv", "series", "show", "shows", "music", "audio", "book", "books", "ebook", "audiobook"}:
                         warnings.append(ConfigValidationWarning(

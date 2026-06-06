@@ -1018,6 +1018,10 @@ config = {
         # This avoids API searches and queue entries for files that are already present locally.
         "local_prefilter": True,
         "local_size_threshold": 0.02,
+        # Also pre-filter against UA's qBitTorrent .torrent file index when available.
+        # This checks whether a matching .torrent still exists in BT_backup and contains the target tracker's announce URL.
+        "torrent_index_prefilter": True,
+        "torrent_index_path": "tmp/torrent_file_index.sqlite",
 
         # Define reusable content libraries. Targets below can reference these names instead of repeating paths.
         # Path need to be set as UA is seeing them.
