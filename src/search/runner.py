@@ -1,3 +1,4 @@
+import asyncio
 import json
 import itertools
 import os
@@ -48,6 +49,7 @@ class SearchRunner:
         profile_name: Optional[str] = None,
         target_filter: Optional[list[str]] = None,
         refresh_scan: bool = False,
+        prepare_cache: bool = False,
     ) -> None:
         search_config = self.config.get("SEARCH")
         if not isinstance(search_config, dict):
@@ -81,6 +83,7 @@ class SearchRunner:
             target_filter,
             stage="started",
             refresh_scan=refresh_scan,
+            prepare_cache=prepare_cache,
         )
 
         libraries = search_config.get("libraries")
@@ -101,6 +104,7 @@ class SearchRunner:
 
             console.print(f"[bold cyan]Search profile:[/bold cyan] {name}")
             matched_targets = 0
+            profile_contexts: list[dict[str, Any]] = []
             for tracker, target in targets.items():
                 if not isinstance(target, dict):
                     continue
@@ -127,6 +131,7 @@ class SearchRunner:
                     tracker=tracker_name,
                     profile=name,
                     refresh_scan=refresh_scan,
+                    prepare_cache=prepare_cache,
                 )
                 home_releases: list[ReleaseInfo] = []
                 home_candidates: list[str] = []
@@ -195,52 +200,39 @@ class SearchRunner:
                         )
 
                 api_cache = await self._load_api_cache(api_cache_file)
-                search_plan = await self._execute_search_plan(
-                    candidates,
-                    tracker_name,
-                    target,
-                    search_config,
-                    home_releases,
-                    content_profile,
-                    api_cache,
-                    tmdb_cache,
-                    progress_interval,
-                    checkpoint_interval,
-                    cache_file,
-                    api_cache_file,
-                    tmdb_cache_file,
-                )
-                await self._write_json(cache_file, search_plan)
-                if self._api_cache_enabled(search_config, target):
-                    await self._write_json(api_cache_file, api_cache)
-                if self._tmdb_cache_enabled(search_config, target):
-                    await self._write_json(tmdb_cache_file, tmdb_cache)
-                queue_source_candidates = [
-                    str(item["path"])
-                    for item in search_plan
-                    if item.get("queue", False)
-                ]
-                queue_candidates = self._materialize_candidates(queue_source_candidates, target, tracker_name)
-                queue_name = str(target.get("queue_name") or f"search_{tracker_name.lower()}_{name}").strip()
-                queue_file = queue_dir / f"{queue_name}_queue.log"
-                await self._write_queue(queue_file, queue_candidates)
-                total_written += len(queue_candidates)
-
-                console.print(
-                    f"[green]{tracker_name}:[/green] wrote {len(queue_candidates)} candidate(s) to "
-                    f"[cyan]{queue_file}[/cyan]"
-                )
-                if self.debug:
-                    console.print(f"[cyan]{tracker_name}:[/cyan] wrote search plan to [cyan]{cache_file}[/cyan]")
+                if prepare_cache:
                     if self._api_cache_enabled(search_config, target):
-                        console.print(f"[cyan]{tracker_name}:[/cyan] wrote API cache to [cyan]{api_cache_file}[/cyan]")
-                console.print(f"[dim]Upload with: python3 upload.py --queue {queue_name} -tk {tracker_name}[/dim]")
+                        await self._write_json(api_cache_file, api_cache)
+                    if self._tmdb_cache_enabled(search_config, target):
+                        await self._write_json(tmdb_cache_file, tmdb_cache)
+                    continue
+                profile_contexts.append({
+                    "candidates": candidates,
+                    "tracker_name": tracker_name,
+                    "target": target,
+                    "search_config": search_config,
+                    "home_releases": home_releases,
+                    "content_profile": content_profile,
+                    "api_cache": api_cache,
+                    "tmdb_cache": tmdb_cache,
+                    "progress_interval": progress_interval,
+                    "checkpoint_interval": checkpoint_interval,
+                    "cache_file": cache_file,
+                    "api_cache_file": api_cache_file,
+                    "tmdb_cache_file": tmdb_cache_file,
+                    "queue_dir": queue_dir,
+                    "profile_name": name,
+                })
 
             if selected_targets and matched_targets == 0:
                 console.print(
                     f"[yellow]SEARCH profile '{name}' has no matching target for: "
                     f"{', '.join(sorted(selected_targets))}[/yellow]"
                 )
+            if prepare_cache:
+                console.print(f"[green]Prepared search cache for profile '{name}' without tracker API searches.[/green]")
+            elif profile_contexts:
+                total_written += await self._run_profile_api_searches(profile_contexts)
 
         await self._write_run_state(
             cache_dir / "search_run_state.json",
@@ -249,6 +241,7 @@ class SearchRunner:
             stage="finished",
             total_written=total_written,
             refresh_scan=refresh_scan,
+            prepare_cache=prepare_cache,
         )
         console.print(f"[bold green]Search queue generation complete.[/bold green] {total_written} total candidate(s).")
 
@@ -261,6 +254,79 @@ class SearchRunner:
             for name, profile in profiles.items()
             if isinstance(profile, dict) and profile.get("enabled", False)
         }
+
+    async def _run_profile_api_searches(self, contexts: list[dict[str, Any]]) -> int:
+        console.print(f"[cyan]Running API searches for {len(contexts)} target(s) in parallel...[/cyan]")
+        results = await asyncio.gather(
+            *(self._run_target_api_search(context) for context in contexts),
+            return_exceptions=True,
+        )
+        total_written = 0
+        for context, result in zip(contexts, results):
+            tracker_name = str(context.get("tracker_name") or "UNKNOWN")
+            if isinstance(result, Exception):
+                console.print(f"[red]{tracker_name}: search task failed: {result}[/red]")
+                continue
+            total_written += int(result or 0)
+        return total_written
+
+    async def _run_target_api_search(self, context: dict[str, Any]) -> int:
+        candidates = list(context["candidates"])
+        tracker_name = str(context["tracker_name"])
+        target = context["target"]
+        search_config = context["search_config"]
+        home_releases = context["home_releases"]
+        content_profile = str(context["content_profile"])
+        api_cache = context["api_cache"]
+        tmdb_cache = context["tmdb_cache"]
+        progress_interval = int(context["progress_interval"])
+        checkpoint_interval = int(context["checkpoint_interval"])
+        cache_file = context["cache_file"]
+        api_cache_file = context["api_cache_file"]
+        tmdb_cache_file = context["tmdb_cache_file"]
+        queue_dir = context["queue_dir"]
+        profile_name = str(context["profile_name"])
+
+        search_plan = await self._execute_search_plan(
+            candidates,
+            tracker_name,
+            target,
+            search_config,
+            home_releases,
+            content_profile,
+            api_cache,
+            tmdb_cache,
+            progress_interval,
+            checkpoint_interval,
+            cache_file,
+            api_cache_file,
+            tmdb_cache_file,
+        )
+        await self._write_json(cache_file, search_plan)
+        if self._api_cache_enabled(search_config, target):
+            await self._write_json(api_cache_file, api_cache)
+        if self._tmdb_cache_enabled(search_config, target):
+            await self._write_json(tmdb_cache_file, tmdb_cache)
+        queue_source_candidates = [
+            str(item["path"])
+            for item in search_plan
+            if item.get("queue", False)
+        ]
+        queue_candidates = self._materialize_candidates(queue_source_candidates, target, tracker_name)
+        queue_name = str(target.get("queue_name") or f"search_{tracker_name.lower()}_{profile_name}").strip()
+        queue_file = queue_dir / f"{queue_name}_queue.log"
+        await self._write_queue(queue_file, queue_candidates)
+
+        console.print(
+            f"[green]{tracker_name}:[/green] wrote {len(queue_candidates)} candidate(s) to "
+            f"[cyan]{queue_file}[/cyan]"
+        )
+        if self.debug:
+            console.print(f"[cyan]{tracker_name}:[/cyan] wrote search plan to [cyan]{cache_file}[/cyan]")
+            if self._api_cache_enabled(search_config, target):
+                console.print(f"[cyan]{tracker_name}:[/cyan] wrote API cache to [cyan]{api_cache_file}[/cyan]")
+        console.print(f"[dim]Upload with: python3 upload.py --queue {queue_name} -tk {tracker_name}[/dim]")
+        return len(queue_candidates)
 
     def _resolve_data_path(self, value: str) -> Path:
         path = Path(value).expanduser()
