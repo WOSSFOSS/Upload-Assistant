@@ -88,6 +88,12 @@ class UNIT3D:
                 "name": book_name or str(meta.get("name", "")),
                 "perPage": "100",
             }
+        elif meta.get("search_query"):
+            params_dict = {
+                "categories[]": category_id,
+                "name": str(meta.get("search_query") or ""),
+                "perPage": "100",
+            }
         else:
             params_dict = {
                 "tmdbId": str(meta['tmdb']),
@@ -130,7 +136,7 @@ class UNIT3D:
         request_params = params_list if params_list is not None else list(params_dict.items())
 
         other_request_params: ParamsList = request_params
-        if not meta.get("is_music") and not meta.get("is_book"):
+        if not meta.get("is_music") and not meta.get("is_book") and not meta.get("search_query"):
             other_params_dict: dict[str, str] = {
                 "tmdbId": str(meta['tmdb']),
                 "categories[]": category_id,

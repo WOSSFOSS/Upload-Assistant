@@ -605,6 +605,27 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                 section="SEARCH"
             ))
 
+    match_mode = search.get("match_mode")
+    if match_mode and str(match_mode).lower() not in {"conservative", "balanced"}:
+        warnings.append(ConfigValidationWarning(
+            "'match_mode' should be 'conservative' or 'balanced'",
+            key="match_mode",
+            section="SEARCH"
+        ))
+
+    fuzzy_size_threshold = search.get("fuzzy_size_threshold")
+    if fuzzy_size_threshold is not None:
+        try:
+            threshold = float(fuzzy_size_threshold)
+            if threshold < 0 or threshold > 0.25:
+                raise ValueError
+        except (TypeError, ValueError):
+            warnings.append(ConfigValidationWarning(
+                "'fuzzy_size_threshold' should be a number between 0 and 0.25",
+                key="fuzzy_size_threshold",
+                section="SEARCH"
+            ))
+
     libraries = search.get("libraries", {})
     if libraries is not None and not isinstance(libraries, dict):
         warnings.append(ConfigValidationWarning(

@@ -982,6 +982,9 @@ config = {
         # Queues and search cache are stored outside tmp so temporary upload metadata can be cleaned safely.
         "queue_dir": "data/queues",
         "cache_dir": "data/search_cache",
+        # Conservative matching keeps false positives low; later tracker API checks use this threshold for size comparisons.
+        "match_mode": "conservative",
+        "fuzzy_size_threshold": 0.02,
 
         # Define reusable content libraries. Targets below can reference these names instead of repeating paths.
         "libraries": {
@@ -1000,6 +1003,8 @@ config = {
                         "source_libraries": ["gpw_movies", "mtv_movies"],
                         "source_paths": [],
                         "queue_name": "search_bhd_movies",
+                        # Queue unknown results when tracker search fails or cannot be performed.
+                        "queue_unknown": True,
                         # Optional: hardlink, symlink, copy, or empty to queue original files.
                         "linking": "",
                         "link_destination": "",
@@ -1009,6 +1014,8 @@ config = {
                         "source_libraries": ["bhd_movies", "mtv_movies"],
                         "source_paths": [],
                         "queue_name": "search_gpw_movies",
+                        # Queue unknown results when tracker search fails or cannot be performed.
+                        "queue_unknown": True,
                         # Optional: hardlink, symlink, copy, or empty to queue original files.
                         "linking": "",
                         "link_destination": "",
@@ -1022,6 +1029,8 @@ config = {
                         "source_libraries": [],
                         "source_paths": [],
                         "queue_name": "search_znth_music",
+                        # Queue unknown results when tracker search fails or cannot be performed.
+                        "queue_unknown": True,
                         # Optional: hardlink, symlink, copy, or empty to queue original files.
                         "linking": "",
                         "link_destination": "",

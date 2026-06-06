@@ -5,6 +5,8 @@ from pathlib import Path
 from typing import Any, Optional
 
 from src.console import console
+from src.search.matcher import SearchMatcher
+from src.search.provider import SearchProvider
 
 
 VIDEO_EXTENSIONS = {".mkv", ".mp4", ".ts", ".avi", ".mov", ".m2ts"}
@@ -18,6 +20,15 @@ class SearchRunner:
         self.config = config
         self.base_dir = base_dir
         self.debug = debug
+        search_config = config.get("SEARCH", {})
+        fuzzy_threshold = 0.02
+        if isinstance(search_config, dict):
+            try:
+                fuzzy_threshold = float(search_config.get("fuzzy_size_threshold", 0.02))
+            except (TypeError, ValueError):
+                fuzzy_threshold = 0.02
+        self.matcher = SearchMatcher(fuzzy_size_threshold=fuzzy_threshold)
+        self.provider = SearchProvider(config, base_dir, self.matcher, debug=debug)
 
     async def run(self, profile_name: Optional[str] = None) -> None:
         search_config = self.config.get("SEARCH")
@@ -66,7 +77,15 @@ class SearchRunner:
                     continue
 
                 candidates = self._scan_paths(source_paths)
-                queue_candidates = self._materialize_candidates(candidates, target, tracker_name)
+                search_plan = await self._execute_search_plan(candidates, tracker_name, target)
+                cache_file = cache_dir / f"{tracker_name.lower()}_{name}_search_plan.json"
+                await self._write_json(cache_file, search_plan)
+                queue_source_candidates = [
+                    str(item["path"])
+                    for item in search_plan
+                    if item.get("queue", False)
+                ]
+                queue_candidates = self._materialize_candidates(queue_source_candidates, target, tracker_name)
                 queue_name = str(target.get("queue_name") or f"search_{tracker_name.lower()}_{name}").strip()
                 queue_file = queue_dir / f"{queue_name}_queue.log"
                 await self._write_queue(queue_file, queue_candidates)
@@ -76,6 +95,8 @@ class SearchRunner:
                     f"[green]{tracker_name}:[/green] wrote {len(queue_candidates)} candidate(s) to "
                     f"[cyan]{queue_file}[/cyan]"
                 )
+                if self.debug:
+                    console.print(f"[cyan]{tracker_name}:[/cyan] wrote search plan to [cyan]{cache_file}[/cyan]")
                 console.print(f"[dim]Upload with: python3 upload.py --queue {queue_name} -tk {tracker_name}[/dim]")
 
         console.print(f"[bold green]Search queue generation complete.[/bold green] {total_written} total candidate(s).")
@@ -183,6 +204,31 @@ class SearchRunner:
                 linked_candidates.append(candidate)
         return linked_candidates
 
+    async def _execute_search_plan(self, candidates: list[str], tracker_name: str, target: dict[str, Any]) -> list[dict[str, Any]]:
+        plan: list[dict[str, Any]] = []
+        include_unknown = bool(target.get("queue_unknown", True))
+        for candidate in candidates:
+            release = self.matcher.parse_release(candidate)
+            queries = self.matcher.build_queries(release)
+            tracker_result = await self.provider.check_tracker(tracker_name, release, queries)
+            status = str(tracker_result.get("status") or "unknown")
+            should_queue = status == "missing" or (status == "unknown" and include_unknown)
+            plan.append({
+                "tracker": tracker_name,
+                "path": candidate,
+                "release": release.to_dict(),
+                "queries": [query.__dict__ for query in queries],
+                "status": status,
+                "reason": tracker_result.get("reason"),
+                "queue": should_queue,
+                "matched_result": tracker_result.get("matched_result"),
+                "query_results": tracker_result.get("queries", []),
+            })
+            if self.debug:
+                color = "green" if should_queue else "yellow"
+                console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} ({tracker_result.get('reason')})[/{color}]")
+        return plan
+
     def _unique_destination(self, destination_root: Path, source: Path) -> Path:
         destination = destination_root / source.name
         if not destination.exists():
@@ -205,6 +251,10 @@ class SearchRunner:
         queue_file.parent.mkdir(parents=True, exist_ok=True)
         content = json.dumps(candidates, indent=4)
         await self._write_text(queue_file, content + "\n")
+
+    async def _write_json(self, path: Path, data: Any) -> None:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        await self._write_text(path, json.dumps(data, indent=4) + "\n")
 
     async def _write_text(self, path: Path, text: str) -> None:
         import asyncio

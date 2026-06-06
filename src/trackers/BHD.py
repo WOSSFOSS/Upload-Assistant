@@ -446,8 +446,9 @@ class BHD:
             return None
 
     async def search_existing(self, meta: dict[str, Any], _disctype: str) -> list[dict[str, Any]]:
+        search_mode = bool(meta.get('search_mode'))
         bhd_name = await self.edit_name(meta)
-        if any(phrase in bhd_name.lower() for phrase in (
+        if not search_mode and any(phrase in bhd_name.lower() for phrase in (
             "-framestor", "-bhdstudio", "-bmf", "-decibel", "-d-zone", "-hifi",
             "-ncmt", "-tdd", "-flux", "-crfw", "-sonny", "-zr-", "-mkvultra",
             "-rpg", "-w4nk3r", "-irobot", "-beyondhd"
@@ -463,17 +464,17 @@ class BHD:
                 meta['skipping'] = "BHD"
                 return []
 
-        if not meta['valid_mi_settings']:
+        if not search_mode and not meta['valid_mi_settings']:
             console.print(f"[bold red]No encoding settings in mediainfo, skipping {self.tracker} upload.[/bold red]")
             meta['skipping'] = "BHD"
             return []
 
-        if meta.get('type') in ['REMUX', 'ENCODE', 'WEBDL', 'WEBRIP'] and meta.get('container') not in ['mkv', 'mp4']:
+        if not search_mode and meta.get('type') in ['REMUX', 'ENCODE', 'WEBDL', 'WEBRIP'] and meta.get('container') not in ['mkv', 'mp4']:
             console.print(f"[bold red]Container '{meta.get('container')}' is not allowed for {meta['type']}. Only MKV and MP4 are permitted. Skipping upload.[/bold red]")
             meta['skipping'] = "BHD"
             return []
 
-        if meta['type'] not in ['WEBDL'] and meta.get('tag', "") and any(x in meta['tag'] for x in ['EVO']):
+        if not search_mode and meta['type'] not in ['WEBDL'] and meta.get('tag', "") and any(x in meta['tag'] for x in ['EVO']):
             if not meta['unattended'] or (meta['unattended'] and meta.get('unattended_confirm', False)):
                 console.print(f'[bold red]Group {meta["tag"]} is only allowed for raw type content at BHD[/bold red]')
                 if cli_ui.ask_yes_no("Do you want to upload anyway?", default=False):
@@ -487,7 +488,7 @@ class BHD:
 
         genres = f"{meta.get('keywords', '')} {meta.get('combined_genres', '')}"
         adult_keywords = ['xxx', 'erotic', 'porn', 'adult', 'orgy']
-        if any(re.search(rf'(^|,\s*){re.escape(keyword)}(\s*,|$)', genres, re.IGNORECASE) for keyword in adult_keywords):
+        if not search_mode and any(re.search(rf'(^|,\s*){re.escape(keyword)}(\s*,|$)', genres, re.IGNORECASE) for keyword in adult_keywords):
             if (not meta['unattended'] or (meta['unattended'] and meta.get('unattended_confirm', False))):
                 console.print('[bold red]Porn/xxx is not allowed at BHD.')
                 if cli_ui.ask_yes_no("Do you want to upload anyway?", default=False):
@@ -516,6 +517,9 @@ class BHD:
             'types': type_id,
             'categories': category
         }
+        if meta.get('search_query'):
+            data.pop('tmdb_id', None)
+            data['search'] = str(meta.get('search_query') or '')
         if meta['sd'] == 1:
             data['categories'] = None
             data['types'] = None
@@ -530,6 +534,9 @@ class BHD:
             'tmdb_id': f"{tmdbID}/{meta['tmdb']}",
             'categories': category
         }
+        if meta.get('search_query'):
+            other_data.pop('tmdb_id', None)
+            other_data['search'] = str(meta.get('search_query') or '')
         if meta['category'] == 'TV':
             other_data['search'] = f"{meta.get('season', '')}"
         if rss_key:
