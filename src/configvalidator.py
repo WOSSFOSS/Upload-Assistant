@@ -626,6 +626,19 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                 section="SEARCH"
             ))
 
+    local_size_threshold = search.get("local_size_threshold")
+    if local_size_threshold is not None:
+        try:
+            threshold = float(local_size_threshold)
+            if threshold < 0 or threshold > 0.25:
+                raise ValueError
+        except (TypeError, ValueError):
+            warnings.append(ConfigValidationWarning(
+                "'local_size_threshold' should be a number between 0 and 0.25",
+                key="local_size_threshold",
+                section="SEARCH"
+            ))
+
     libraries = search.get("libraries", {})
     if libraries is not None and not isinstance(libraries, dict):
         warnings.append(ConfigValidationWarning(
@@ -668,6 +681,35 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                             key=str(tracker),
                             section="SEARCH"
                         ))
+                        continue
+                    for path_key in ("source_paths", "home_paths"):
+                        value = target.get(path_key)
+                        if value is not None and not isinstance(value, (str, list)):
+                            warnings.append(ConfigValidationWarning(
+                                f"Target '{tracker}' {path_key} should be a string path or a list of paths",
+                                key=str(tracker),
+                                section="SEARCH"
+                            ))
+                    for library_key in ("source_libraries", "home_libraries"):
+                        value = target.get(library_key)
+                        if value is not None and not isinstance(value, (str, list)):
+                            warnings.append(ConfigValidationWarning(
+                                f"Target '{tracker}' {library_key} should be a string name or a list of names",
+                                key=str(tracker),
+                                section="SEARCH"
+                            ))
+                    target_local_size_threshold = target.get("local_size_threshold")
+                    if target_local_size_threshold is not None:
+                        try:
+                            threshold = float(target_local_size_threshold)
+                            if threshold < 0 or threshold > 0.25:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            warnings.append(ConfigValidationWarning(
+                                f"Target '{tracker}' local_size_threshold should be a number between 0 and 0.25",
+                                key=str(tracker),
+                                section="SEARCH"
+                            ))
 
     return errors, warnings
 

@@ -135,6 +135,52 @@ class SearchMatcher:
             return True, "title_year_group"
         return False, "no_strong_match"
 
+    def local_duplicate_exists(
+        self,
+        release: ReleaseInfo,
+        home_releases: list[ReleaseInfo],
+        size_threshold: Optional[float] = None,
+    ) -> tuple[bool, str, Optional[ReleaseInfo]]:
+        for home_release in home_releases:
+            matches, reason = self.release_matches_release(release, home_release, size_threshold=size_threshold)
+            if matches:
+                return True, reason, home_release
+        return False, "no_local_match", None
+
+    def release_matches_release(
+        self,
+        release: ReleaseInfo,
+        other: ReleaseInfo,
+        size_threshold: Optional[float] = None,
+    ) -> tuple[bool, str]:
+        if not release.release_name or not other.release_name:
+            return False, "missing_release_name"
+
+        size_matches = self._size_values_match(release.size, other.size, size_threshold=size_threshold)
+        if not size_matches:
+            return False, "size_mismatch"
+
+        release_key = self.normalize_release_name(release.release_name)
+        other_key = self.normalize_release_name(other.release_name)
+        if release_key and release_key == other_key:
+            return True, "local_exact_release_name_size"
+
+        title_matches = bool(release.title and other.title and self.normalize_title(release.title) == self.normalize_title(other.title))
+        year_matches = bool(release.year and other.year and release.year == other.year)
+        group_matches = bool(release.group and other.group and release.group.lower() == other.group.lower())
+        resolution_matches = bool(release.resolution and other.resolution and release.resolution.lower() == other.resolution.lower())
+        source_matches = bool(release.source and other.source and release.source == other.source)
+        if release.group and other.group and not group_matches:
+            return False, "group_mismatch"
+
+        if title_matches and year_matches and group_matches and resolution_matches:
+            return True, "local_title_year_group_resolution_size"
+        if title_matches and year_matches and group_matches and source_matches:
+            return True, "local_title_year_group_source_size"
+        if title_matches and year_matches and resolution_matches and source_matches:
+            return True, "local_title_year_resolution_source_size"
+        return False, "no_local_strong_match"
+
     def parse_release_name(self, release_name: str) -> ReleaseInfo:
         group = self._parse_group(release_name)
         year = self._parse_year(release_name)
@@ -151,7 +197,7 @@ class SearchMatcher:
         )
 
     def normalize_release_name(self, value: str) -> str:
-        value = Path(value).stem
+        value = re.sub(r"\.(mkv|mp4|ts|avi|mov|m2ts|flac|mp3|m4a|aac|alac|wav|ogg|opus|epub|pdf|mobi|azw3|lit|cbz|cbr|m4b)$", "", value, flags=re.IGNORECASE)
         return re.sub(r"[^a-z0-9]+", "", value.lower())
 
     def normalize_title(self, value: str) -> str:
@@ -206,11 +252,15 @@ class SearchMatcher:
             result_size_int = int(result_size)
         except (TypeError, ValueError):
             return False
-        if release_size <= 0 or result_size_int <= 0:
+        return self._size_values_match(release_size, result_size_int)
+
+    def _size_values_match(self, left_size: int, right_size: int, size_threshold: Optional[float] = None) -> bool:
+        if left_size <= 0 or right_size <= 0:
             return False
-        lower = release_size * (1 - self.fuzzy_size_threshold)
-        upper = release_size * (1 + self.fuzzy_size_threshold)
-        return lower <= result_size_int <= upper
+        threshold = self.fuzzy_size_threshold if size_threshold is None else size_threshold
+        lower = left_size * (1 - threshold)
+        upper = left_size * (1 + threshold)
+        return lower <= right_size <= upper
 
     def _dedupe_queries(self, queries: list[SearchQuery]) -> list[SearchQuery]:
         seen: set[tuple[str, str]] = set()

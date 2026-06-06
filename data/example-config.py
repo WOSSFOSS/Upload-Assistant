@@ -985,6 +985,10 @@ config = {
         # Conservative matching keeps false positives low; later tracker API checks use this threshold for size comparisons.
         "match_mode": "conservative",
         "fuzzy_size_threshold": 0.02,
+        # Local pre-filtering compares source files against the target tracker's own local library first.
+        # This avoids API searches and queue entries for files that are already present locally.
+        "local_prefilter": True,
+        "local_size_threshold": 0.02,
 
         # Define reusable content libraries. Targets below can reference these names instead of repeating paths.
         "libraries": {
@@ -1002,6 +1006,8 @@ config = {
                     "BHD": {
                         "source_libraries": ["gpw_movies", "mtv_movies"],
                         "source_paths": [],
+                        "home_libraries": ["bhd_movies"],
+                        "home_paths": [],
                         "queue_name": "search_bhd_movies",
                         # Queue unknown results when tracker search fails or cannot be performed.
                         "queue_unknown": True,
@@ -1013,6 +1019,8 @@ config = {
                     "GPW": {
                         "source_libraries": ["bhd_movies", "mtv_movies"],
                         "source_paths": [],
+                        "home_libraries": ["gpw_movies"],
+                        "home_paths": [],
                         "queue_name": "search_gpw_movies",
                         # Queue unknown results when tracker search fails or cannot be performed.
                         "queue_unknown": True,
@@ -1028,6 +1036,8 @@ config = {
                     "ZNTH": {
                         "source_libraries": [],
                         "source_paths": [],
+                        "home_libraries": ["znth_music"],
+                        "home_paths": [],
                         "queue_name": "search_znth_music",
                         # Queue unknown results when tracker search fails or cannot be performed.
                         "queue_unknown": True,
