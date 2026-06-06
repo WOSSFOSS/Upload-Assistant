@@ -995,7 +995,9 @@ config = {
         # Path need to be set as UA is seeing them.
         "libraries": {
             # "bhd_movies": ["/media/bhd/movies"],
+            # "bhd_tv": ["/media/bhd/tv"],
             # "gpw_movies": ["/media/gpw/movies"],
+            # "mtv_tv": ["/media/mtv/tv"],
             # "mtv_movies": ["/media/mtv/movies"],
             # "znth_music": ["/media/znth/music"],
         },
@@ -1004,6 +1006,9 @@ config = {
             "movies": {
                 "enabled": False,
                 "targets": {
+                    # content "movie" queues movie files and full-disc main folders.
+                    # Full-discs are detected by BDMV/index.bdmv or VIDEO_TS/VIDEO_TS.IFO; the release folder is queued.
+                    # Single TV episodes like S01E01 are ignored in movie searches.
                     # Search GPW/MTV libraries for content that may be uploaded to BHD.
                     "BHD": {
                         "content": "movie",
@@ -1026,6 +1031,40 @@ config = {
                         "home_libraries": ["gpw_movies"],
                         "home_paths": [],
                         "queue_name": "search_gpw_movies",
+                        # Queue unknown results when tracker search fails or cannot be performed.
+                        "queue_unknown": True,
+                        # Optional: hardlink, symlink, copy, or empty to queue original files.
+                        "linking": "",
+                        "link_destination": "",
+                    },
+                },
+            },
+            "tv": {
+                "enabled": False,
+                "targets": {
+                    # content "tv" only queues season packs. Single episodes like S01E01 are ignored.
+                    # A season pack may be a season folder with multiple episode files or a single pack file.
+                    "BHD": {
+                        "content": "tv",
+                        "source_libraries": ["mtv_tv"],
+                        "source_paths": [],
+                        "home_libraries": ["bhd_tv"],
+                        "home_paths": [],
+                        "queue_name": "search_bhd_tv",
+                        # Queue unknown results when tracker search fails or cannot be performed.
+                        "queue_unknown": True,
+                        # Optional: hardlink, symlink, copy, or empty to queue original files.
+                        "linking": "",
+                        "link_destination": "",
+                    },
+                    # Search BHD TV libraries for season packs that may be uploaded to MTV.
+                    "MTV": {
+                        "content": "tv",
+                        "source_libraries": ["bhd_tv"],
+                        "source_paths": [],
+                        "home_libraries": ["mtv_tv"],
+                        "home_paths": [],
+                        "queue_name": "search_mtv_tv",
                         # Queue unknown results when tracker search fails or cannot be performed.
                         "queue_unknown": True,
                         # Optional: hardlink, symlink, copy, or empty to queue original files.
