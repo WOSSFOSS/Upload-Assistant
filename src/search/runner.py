@@ -201,6 +201,19 @@ class SearchRunner:
 
                 api_cache = await self._load_api_cache(api_cache_file)
                 if prepare_cache:
+                    if self._tmdb_lookup_enabled(search_config, target) and self._tmdb_cache_enabled(search_config, target):
+                        await self._prepare_tmdb_cache(
+                            candidates,
+                            tracker_name,
+                            target,
+                            search_config,
+                            home_releases,
+                            content_profile,
+                            tmdb_cache,
+                            tmdb_cache_file,
+                            progress_interval,
+                            checkpoint_interval,
+                        )
                     if self._api_cache_enabled(search_config, target):
                         await self._write_json(api_cache_file, api_cache)
                     if self._tmdb_cache_enabled(search_config, target):
@@ -328,6 +341,78 @@ class SearchRunner:
                 console.print(f"[cyan]{tracker_name}:[/cyan] wrote API cache to [cyan]{api_cache_file}[/cyan]")
         console.print(f"[dim]Upload with: python3 upload.py --queue {queue_name} -tk {tracker_name}[/dim]")
         return len(queue_candidates)
+
+    async def _prepare_tmdb_cache(
+        self,
+        candidates: list[str],
+        tracker_name: str,
+        target: dict[str, Any],
+        search_config: dict[str, Any],
+        home_releases: list[ReleaseInfo],
+        content_profile: str,
+        tmdb_cache: dict[str, Any],
+        tmdb_cache_file: Path,
+        progress_interval: int,
+        checkpoint_interval: int,
+    ) -> None:
+        if content_profile not in {"movie", "tv"}:
+            return
+        total_candidates = len(candidates)
+        if total_candidates:
+            console.print(f"[cyan]{tracker_name}:[/cyan] preparing TMDB/IMDb ID cache for {total_candidates} candidate(s)...")
+        local_prefilter = self._local_prefilter_enabled(search_config, target)
+        local_size_threshold = self._local_size_threshold(search_config, target)
+        torrent_index_prefilter = self._torrent_index_prefilter_enabled(search_config, target)
+        tmdb_cache_ttl_days = self._tmdb_cache_ttl_days(search_config, target)
+        tmdb_delay_seconds = self._tmdb_delay_seconds(search_config, target)
+        tmdb_error_backoff_seconds = self._tmdb_error_backoff_seconds(search_config, target)
+        prepared = 0
+        skipped = 0
+        for index, candidate in enumerate(candidates, start=1):
+            if progress_interval > 0 and (index == 1 or index % progress_interval == 0):
+                console.print(
+                    f"[dim]{tracker_name}: prepared TMDB IDs for {index - 1}/{total_candidates} "
+                    f"candidate(s), {prepared} cached, {skipped} skipped...[/dim]"
+                )
+            release = self.matcher.parse_release(candidate)
+            banned, _ = self.provider.banned_release_group(tracker_name, release)
+            if banned:
+                skipped += 1
+                continue
+            if torrent_index_prefilter:
+                client_exists, _ = self._torrent_index_candidate_exists(release, tracker_name, search_config, target)
+                if client_exists:
+                    skipped += 1
+                    continue
+            if local_prefilter and home_releases:
+                local_exists, _, _ = self.matcher.local_duplicate_exists(
+                    release,
+                    home_releases,
+                    size_threshold=local_size_threshold,
+                )
+                if local_exists:
+                    skipped += 1
+                    continue
+            ids = await self.provider.resolve_external_ids(
+                release,
+                content_profile,
+                tmdb_cache,
+                ttl_days=tmdb_cache_ttl_days,
+                delay_seconds=tmdb_delay_seconds,
+                error_backoff_seconds=tmdb_error_backoff_seconds,
+            )
+            if ids:
+                prepared += 1
+            if checkpoint_interval > 0 and index % checkpoint_interval == 0:
+                await self._write_json(tmdb_cache_file, tmdb_cache)
+                if self.debug:
+                    console.print(f"[dim]{tracker_name}: TMDB cache checkpoint saved after {index} candidate(s)[/dim]")
+        await self._write_json(tmdb_cache_file, tmdb_cache)
+        if total_candidates:
+            console.print(
+                f"[green]{tracker_name}:[/green] prepared TMDB/IMDb cache "
+                f"({prepared} cached, {skipped} skipped)"
+            )
 
     def _resolve_data_path(self, value: str) -> Path:
         path = Path(value).expanduser()
@@ -643,6 +728,8 @@ class SearchRunner:
         api_cache_ttl_days = self._api_cache_ttl_days(search_config, target)
         tmdb_lookup = self._tmdb_lookup_enabled(search_config, target)
         tmdb_cache_ttl_days = self._tmdb_cache_ttl_days(search_config, target)
+        tmdb_delay_seconds = self._tmdb_delay_seconds(search_config, target)
+        tmdb_error_backoff_seconds = self._tmdb_error_backoff_seconds(search_config, target)
         api_delay_seconds = self._api_delay_seconds(search_config, target)
         api_error_backoff_seconds = self._api_error_backoff_seconds(search_config, target)
         total_candidates = len(candidates)
@@ -659,6 +746,8 @@ class SearchRunner:
                     content_profile,
                     tmdb_cache,
                     ttl_days=tmdb_cache_ttl_days,
+                    delay_seconds=tmdb_delay_seconds,
+                    error_backoff_seconds=tmdb_error_backoff_seconds,
                 )
             queries = self.matcher.build_queries(release, ids)
             banned, banned_group = self.provider.banned_release_group(tracker_name, release)
@@ -1007,6 +1096,22 @@ class SearchRunner:
         except (TypeError, ValueError):
             ttl_days = 180.0
         return max(0.0, ttl_days)
+
+    def _tmdb_delay_seconds(self, search_config: dict[str, Any], target: dict[str, Any]) -> float:
+        value = target.get("tmdb_delay_seconds", search_config.get("tmdb_delay_seconds", 0.25))
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            delay = 0.25
+        return max(0.0, delay)
+
+    def _tmdb_error_backoff_seconds(self, search_config: dict[str, Any], target: dict[str, Any]) -> float:
+        value = target.get("tmdb_error_backoff_seconds", search_config.get("tmdb_error_backoff_seconds", 5))
+        try:
+            delay = float(value)
+        except (TypeError, ValueError):
+            delay = 5.0
+        return max(0.0, delay)
 
     def _progress_interval(self, search_config: dict[str, Any], target: dict[str, Any]) -> int:
         value = target.get("progress_interval", search_config.get("progress_interval", 5000))

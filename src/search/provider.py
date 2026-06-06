@@ -25,6 +25,8 @@ class SearchProvider:
         content_profile: str,
         tmdb_cache: dict[str, Any],
         ttl_days: float = 180,
+        delay_seconds: float = 0.0,
+        error_backoff_seconds: float = 0.0,
     ) -> dict[str, Any]:
         if content_profile not in {"movie", "tv"}:
             return {}
@@ -48,6 +50,8 @@ class SearchProvider:
             params["year" if search_type == "movie" else "first_air_date_year"] = release.year
 
         try:
+            if delay_seconds > 0:
+                await asyncio.sleep(delay_seconds)
             async with httpx.AsyncClient(timeout=10) as client:
                 search_response = await client.get(f"https://api.themoviedb.org/3/search/{search_type}", params=params)
                 search_response.raise_for_status()
@@ -73,6 +77,8 @@ class SearchProvider:
         except Exception as e:
             if self.debug:
                 console.print(f"[yellow]TMDB lookup failed for {release.release_name}: {e}[/yellow]")
+            if error_backoff_seconds > 0:
+                await asyncio.sleep(error_backoff_seconds)
             return {}
 
     def banned_release_group(self, tracker_name: str, release: ReleaseInfo) -> tuple[bool, str]:

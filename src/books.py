@@ -46,6 +46,8 @@ def is_book_path(path: str) -> bool:
     video_extensions = {".mkv", ".mp4", ".ts", ".avi", ".wmv", ".mov", ".m2ts"}
     audiobook_files = _collect_files(path_obj, AUDIOBOOK_EXTENSIONS)
     video_files = _collect_files(path_obj, video_extensions)
+    if not video_files and any(file.suffix.lower() == ".m4b" for file in audiobook_files):
+        return True
     return not video_files and bool(audiobook_files) and _looks_like_audiobook(path_obj.name)
 
 

@@ -998,9 +998,12 @@ config = {
         "tmdb_lookup": True,
         "tmdb_cache": True,
         "tmdb_cache_ttl_days": 180,
+        # Optional grace period for real TMDB lookups. Cache hits do not wait.
+        "tmdb_delay_seconds": 0.25,
+        "tmdb_error_backoff_seconds": 5,
         # Cache source/home filesystem scans between runs.
         # Use upload.py --search --refresh-scan to ignore the cached scan once and write a fresh checkpoint.
-        # Use upload.py --prepare-search-cache --search-profile movies --refresh-scan for a cron-friendly cache refresh without tracker API searches.
+        # Use upload.py --prepare-search-cache --search-profile movies --refresh-scan for a cron-friendly scan/TMDB cache refresh without tracker API searches.
         # Set scan_cache to False to force a fresh scan every time.
         # Set scan_cache_ttl_hours to 0 to keep scan checkpoints indefinitely.
         "scan_cache": True,

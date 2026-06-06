@@ -673,7 +673,7 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                 section="SEARCH"
             ))
 
-    for key in ("api_delay_seconds", "api_error_backoff_seconds"):
+    for key in ("api_delay_seconds", "api_error_backoff_seconds", "tmdb_delay_seconds", "tmdb_error_backoff_seconds"):
         value = search.get(key)
         if value is not None:
             try:
@@ -822,7 +822,7 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                                 key=str(tracker),
                                 section="SEARCH"
                             ))
-                    for delay_key in ("api_delay_seconds", "api_error_backoff_seconds"):
+                    for delay_key in ("api_delay_seconds", "api_error_backoff_seconds", "tmdb_delay_seconds", "tmdb_error_backoff_seconds"):
                         delay_value = target.get(delay_key)
                         if delay_value is not None:
                             try:
