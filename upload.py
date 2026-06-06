@@ -1939,7 +1939,7 @@ async def do_the_thing(base_dir: str) -> None:
 
     except Exception as e:
         console.print(f"[bold red]An unexpected error occurred: {e}")
-        if sanitize_meta:
+        if sanitize_meta and not meta.get('search'):
             meta = await Redaction.clean_meta_for_export(meta)
         console.print(traceback.format_exc())
         cleanup_manager.reset_terminal()

@@ -195,7 +195,7 @@ class SearchProvider:
         is_tv = content_profile == "tv"
         is_disc = self._disc_type(release.path)
         uhd = "UHD" if release.resolution in {"2160p", "4320p", "8640p"} else ""
-        size_gib = release.size_bytes / (1024 ** 3) if release.size_bytes else 0
+        size_gib = release.size / (1024 ** 3) if release.size else 0
         tmdb = str(ids.get("tmdb") or "0")
         imdb = str(ids.get("imdb") or "0")
         imdb_numeric = re.sub(r"^tt", "", imdb)
@@ -221,7 +221,7 @@ class SearchProvider:
             "sd": 1 if release.resolution in {"480p", "480i", "576p", "576i"} else 0,
             "is_disc": is_disc,
             "bdinfo": {"size": size_gib} if is_disc == "BDMV" else None,
-            "dvd_size": self._dvd_size(release.size_bytes) if is_disc == "DVD" else "",
+            "dvd_size": self._dvd_size(release.size) if is_disc == "DVD" else "",
             "is_music": False,
             "is_book": False,
             "filelist": [release.path],
