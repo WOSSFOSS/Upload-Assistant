@@ -39,7 +39,7 @@ class SearchRunner:
         self.matcher = SearchMatcher(fuzzy_size_threshold=fuzzy_threshold)
         self.provider = SearchProvider(config, base_dir, self.matcher, debug=debug)
 
-    async def run(self, profile_name: Optional[str] = None) -> None:
+    async def run(self, profile_name: Optional[str] = None, target_filter: Optional[list[str]] = None) -> None:
         search_config = self.config.get("SEARCH")
         if not isinstance(search_config, dict):
             console.print("[red]No SEARCH config block found.[/red]")
@@ -67,6 +67,9 @@ class SearchRunner:
 
         libraries = search_config.get("libraries")
         libraries_map = libraries if isinstance(libraries, dict) else {}
+        selected_targets = {target.upper() for target in target_filter or [] if target.strip()}
+        if selected_targets:
+            console.print(f"[cyan]Search target filter:[/cyan] {', '.join(sorted(selected_targets))}")
 
         total_written = 0
         for name, profile in selected_profiles.items():
@@ -78,10 +81,14 @@ class SearchRunner:
                 continue
 
             console.print(f"[bold cyan]Search profile:[/bold cyan] {name}")
+            matched_targets = 0
             for tracker, target in targets.items():
                 if not isinstance(target, dict):
                     continue
                 tracker_name = str(tracker).strip().upper()
+                if selected_targets and tracker_name not in selected_targets:
+                    continue
+                matched_targets += 1
                 source_paths = self._resolve_source_paths(target, libraries_map)
                 if not source_paths:
                     console.print(f"[yellow]{tracker_name}: no source paths configured.[/yellow]")
@@ -151,6 +158,12 @@ class SearchRunner:
                     if self._api_cache_enabled(search_config, target):
                         console.print(f"[cyan]{tracker_name}:[/cyan] wrote API cache to [cyan]{api_cache_file}[/cyan]")
                 console.print(f"[dim]Upload with: python3 upload.py --queue {queue_name} -tk {tracker_name}[/dim]")
+
+            if selected_targets and matched_targets == 0:
+                console.print(
+                    f"[yellow]SEARCH profile '{name}' has no matching target for: "
+                    f"{', '.join(sorted(selected_targets))}[/yellow]"
+                )
 
         console.print(f"[bold green]Search queue generation complete.[/bold green] {total_written} total candidate(s).")
 

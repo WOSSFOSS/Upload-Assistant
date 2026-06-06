@@ -1568,8 +1568,11 @@ async def do_the_thing(base_dir: str) -> None:
 
         if meta.get('search'):
             meta.setdefault('uuid', 'search-mode')
+            raw_search_trackers = meta.get('trackers')
+            search_trackers = raw_search_trackers if isinstance(raw_search_trackers, list) else None
             await SearchRunner(config, base_dir, debug=bool(meta.get('debug'))).run(
-                str(meta.get('search_profile') or '').strip() or None
+                str(meta.get('search_profile') or '').strip() or None,
+                target_filter=search_trackers,
             )
             return
 
