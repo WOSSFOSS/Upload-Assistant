@@ -144,12 +144,12 @@ class NameManager:
             author = str(meta.get('author', '')).strip()
             book_title = str(meta.get('title', '')).strip()
             book_type = str(meta.get('type', '')).strip().upper()
-            isbn = re.sub(r'[-\s]', '', str(meta.get('isbn') or '')).upper()
             name = ' '.join(part for part in [f"{author} - {book_title}".strip(" -"), year, book_type] if part)
             if meta.get('is_audiobook'):
+                isbn = re.sub(r'[-\s]', '', str(meta.get('isbn') or meta.get('audible_asin') or '')).upper()
                 bitrate = str(meta.get('audiobook_bitrate') or meta.get('bitrate') or '').strip()
                 bitrate_match = re.search(r'\d+(?:\.\d+)?', bitrate)
-                if bitrate_match and book_type in {'MP3', 'AAC', 'OPUS', 'OGG', 'VORBIS', 'M4A'}:
+                if bitrate_match and book_type in {'MP3', 'AAC', 'OPUS', 'OGG', 'VORBIS', 'M4A', 'M4B'}:
                     bitrate_value = float(bitrate_match.group(0))
                     if bitrate_value > 1000:
                         bitrate_value = bitrate_value / 1000
@@ -159,6 +159,7 @@ class NameManager:
                 if meta.get('retail'):
                     name = f"{name} Retail"
             else:
+                isbn = re.sub(r'[-\s]', '', str(meta.get('isbn') or '')).upper()
                 edition = str(meta.get('edition') or '').strip()
                 if edition:
                     name = ' '.join(part for part in [f"{author} - {book_title}".strip(" -"), year, edition, book_type] if part)

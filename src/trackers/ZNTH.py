@@ -39,13 +39,13 @@ class ZNTH(UNIT3D):
         title = self._clean_name_part(meta.get('title')) or self._clean_name_part(meta.get('name')) or 'Unknown Title'
         year = self._clean_year(meta.get('year'))
         book_format = self._clean_format(meta.get('type'))
-        isbn = self._clean_isbn(meta.get('isbn'))
         tag = self._clean_tag(meta.get('tag'))
 
         if meta.get('is_audiobook'):
+            isbn = self._clean_isbn(meta.get('isbn') or meta.get('audible_asin'))
             parts = [f"{author} - {title}", year, book_format]
             bitrate = self._book_bitrate(meta)
-            if bitrate and book_format.upper() in {'MP3', 'AAC', 'OPUS', 'OGG', 'VORBIS', 'M4A'}:
+            if bitrate and book_format.upper() in {'MP3', 'AAC', 'OPUS', 'OGG', 'VORBIS', 'M4A', 'M4B'}:
                 parts.append(bitrate)
             if isbn:
                 parts.append(isbn)
@@ -54,6 +54,7 @@ class ZNTH(UNIT3D):
             name = ' '.join(part for part in parts if part)
             return self._append_group_tag(name, tag)
 
+        isbn = self._clean_isbn(meta.get('isbn'))
         parts = [f"{author} - {title}", year]
         edition = self._clean_name_part(meta.get('edition'))
         if edition:

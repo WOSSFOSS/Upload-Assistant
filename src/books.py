@@ -141,7 +141,7 @@ def _duration_seconds(value: Any) -> Optional[int]:
         duration = float(value)
     except (TypeError, ValueError):
         return None
-    return int(round(duration / 1000 if duration >= 10000 else duration))
+    return int(round(duration / 1000 if duration >= 100000 else duration))
 
 
 def _duration_string(seconds: int) -> str:
@@ -710,7 +710,7 @@ class BookProcessor:
             return None
         marketplace = str(self.config.get("DEFAULT", {}).get("audible_marketplace", "com") or "com").strip().lower()
         marketplace = re.sub(r"[^a-z.]", "", marketplace) or "com"
-        cache_key = _slug(" ".join(part for part in [title, author, marketplace] if part))
+        cache_key = _slug(" ".join(part for part in ["v2", title, author, marketplace] if part))
         cache_dir = Path(meta["base_dir"]) / "tmp" / "audible_cache"
         cache_file = cache_dir / f"{cache_key}.json"
         cache_dir.mkdir(parents=True, exist_ok=True)
@@ -721,27 +721,54 @@ class BookProcessor:
                     cached = json.loads(await f.read())
                     data = cached if isinstance(cached, dict) else None
         if data is None:
-            params = {
-                "title": title,
-                "num_results": 5,
-                "products_sort_by": "Relevance",
-                "image_sizes": "500",
-                "response_groups": "contributors,media,product_attrs,product_desc,product_extended_attrs,series",
-            }
-            if author and author.lower() != "unknown author":
-                params["author"] = author
+            queries = self._audible_queries(title, author)
+            if meta.get("debug"):
+                console.print(f"[cyan]Audible lookup: {queries[0]}[/cyan]")
             try:
                 async with httpx.AsyncClient(timeout=12.0, follow_redirects=True, headers={"User-Agent": self.user_agent}) as client:
-                    response = await client.get(f"https://api.audible.{marketplace}/1.0/catalog/products", params=params)
-                    response.raise_for_status()
-                    data = response.json()
+                    data = {}
+                    for query in queries:
+                        params = {
+                            "keywords": query,
+                            "num_results": 10,
+                            "products_sort_by": "Relevance",
+                            "image_sizes": "500",
+                            "response_groups": "contributors,media,product_attrs,product_desc,product_extended_attrs,series",
+                        }
+                        response = await client.get(f"https://api.audible.{marketplace}/1.0/catalog/products", params=params)
+                        response.raise_for_status()
+                        query_data = response.json()
+                        if isinstance(query_data, dict) and query_data.get("products"):
+                            data = query_data
+                            break
                 async with aiofiles.open(cache_file, "w", encoding="utf-8") as f:
                     await f.write(json.dumps(data, indent=2))
             except Exception as e:
                 if meta.get("debug"):
                     console.print(f"[yellow]Audible lookup failed for {title}: {e}[/yellow]")
                 return None
-        return self._parse_audible(data, title, author, marketplace)
+        parsed = self._parse_audible(data, title, author, marketplace)
+        if meta.get("debug"):
+            if parsed and parsed.get("audible_link"):
+                console.print(f"[green]Audible lookup found: {parsed['audible_link']}[/green]")
+            else:
+                products = data.get("products") if isinstance(data, dict) else []
+                count = len(products) if isinstance(products, list) else 0
+                console.print(f"[yellow]Audible lookup found no strong match ({count} result(s))[/yellow]")
+        return parsed
+
+    def _audible_queries(self, title: str, author: str) -> list[str]:
+        title_parts = [title]
+        if ":" in title:
+            title_parts.append(title.split(":", 1)[0].strip())
+        queries: list[str] = []
+        for title_part in title_parts:
+            query = " ".join(part for part in [title_part, author if author.lower() != "unknown author" else ""] if part).strip()
+            if query:
+                queries.append(query)
+        if title:
+            queries.append(title)
+        return list(dict.fromkeys(queries))
 
     def _parse_audible(self, data: dict[str, Any], title: str, author: str, marketplace: str) -> Optional[dict[str, Any]]:
         products = data.get("products") if isinstance(data, dict) else None
@@ -785,6 +812,7 @@ class BookProcessor:
         asin = _mi_value(product.get("asin"))
         if asin:
             metadata["audible_asin"] = asin
+            metadata["isbn"] = asin
             metadata["audible_link"] = f"https://www.audible.{marketplace}/pd/{asin}"
         abridgement = " ".join(
             _mi_value(product.get(key))
