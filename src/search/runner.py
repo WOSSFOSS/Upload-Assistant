@@ -21,7 +21,7 @@ VIDEO_EXTENSIONS = {".mkv", ".mp4", ".ts", ".avi", ".mov", ".m2ts"}
 MUSIC_EXTENSIONS = {".flac", ".mp3", ".m4a", ".aac", ".alac", ".wav", ".ogg", ".opus"}
 BOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".lit", ".cbz", ".cbr", ".m4b"}
 SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS | MUSIC_EXTENSIONS | BOOK_EXTENSIONS
-EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}e\d{1,3}|s\d{1,2}e\d{1,3}e\d{1,3}|\d{1,2}x\d{1,3})(?:[.\s_\-]|$)")
+EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}e\d{1,3}|s\d{1,2}e\d{1,3}e\d{1,3}|\d{1,2}x\d{1,3}|(?:19|20)\d{2}[.\-_]\d{1,2}[.\-_]\d{1,2})(?:[.\s_\-]|$)")
 SEASON_PACK_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}|season[.\s_\-]?\d{1,2}|complete)(?:[.\s_\-]|$)")
 DISC_MARKERS = {
     "BDMV": {"BDMV/index.bdmv", "BDMV/BACKUP/index.bdmv"},
