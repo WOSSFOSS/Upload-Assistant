@@ -2,6 +2,7 @@ import json
 import os
 import re
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Optional
 
@@ -93,9 +94,21 @@ class SearchRunner:
                     if self.debug:
                         console.print(f"[cyan]{tracker_name}:[/cyan] local prefilter loaded {len(home_releases)} home file(s)")
 
-                search_plan = await self._execute_search_plan(candidates, tracker_name, target, search_config, home_releases, content_profile)
                 cache_file = cache_dir / f"{tracker_name.lower()}_{name}_search_plan.json"
+                api_cache_file = cache_dir / f"{tracker_name.lower()}_{name}_api_cache.json"
+                api_cache = await self._load_api_cache(api_cache_file)
+                search_plan = await self._execute_search_plan(
+                    candidates,
+                    tracker_name,
+                    target,
+                    search_config,
+                    home_releases,
+                    content_profile,
+                    api_cache,
+                )
                 await self._write_json(cache_file, search_plan)
+                if self._api_cache_enabled(search_config, target):
+                    await self._write_json(api_cache_file, api_cache)
                 queue_source_candidates = [
                     str(item["path"])
                     for item in search_plan
@@ -113,6 +126,8 @@ class SearchRunner:
                 )
                 if self.debug:
                     console.print(f"[cyan]{tracker_name}:[/cyan] wrote search plan to [cyan]{cache_file}[/cyan]")
+                    if self._api_cache_enabled(search_config, target):
+                        console.print(f"[cyan]{tracker_name}:[/cyan] wrote API cache to [cyan]{api_cache_file}[/cyan]")
                 console.print(f"[dim]Upload with: python3 upload.py --queue {queue_name} -tk {tracker_name}[/dim]")
 
         console.print(f"[bold green]Search queue generation complete.[/bold green] {total_written} total candidate(s).")
@@ -338,11 +353,14 @@ class SearchRunner:
         search_config: dict[str, Any],
         home_releases: list[ReleaseInfo],
         content_profile: str,
+        api_cache: dict[str, Any],
     ) -> list[dict[str, Any]]:
         plan: list[dict[str, Any]] = []
         include_unknown = bool(target.get("queue_unknown", True))
         local_prefilter = self._local_prefilter_enabled(search_config, target)
         local_size_threshold = self._local_size_threshold(search_config, target)
+        api_cache_enabled = self._api_cache_enabled(search_config, target)
+        api_cache_ttl_days = self._api_cache_ttl_days(search_config, target)
         for candidate in candidates:
             release = self.matcher.parse_release(candidate)
             queries = self.matcher.build_queries(release)
@@ -364,15 +382,41 @@ class SearchRunner:
                         "matched_result": None,
                         "local_match": local_match.to_dict() if local_match else None,
                         "query_results": [],
+                        "cache_hit": False,
                     })
                     if self.debug:
                         match_name = local_match.basename if local_match else "unknown"
                         console.print(f"[yellow]{tracker_name}: {release.basename} -> local_exists ({local_reason}: {match_name})[/yellow]")
                     continue
 
+            cache_key = self._api_cache_key(tracker_name, content_profile, release)
+            cached_result = self._api_cache_lookup(api_cache, cache_key, api_cache_ttl_days) if api_cache_enabled else None
+            if cached_result is not None:
+                status = str(cached_result.get("status") or "unknown")
+                should_queue = status == "missing" or (status == "unknown" and include_unknown)
+                plan.append({
+                    "tracker": tracker_name,
+                    "path": candidate,
+                    "release": release.to_dict(),
+                    "queries": [query.__dict__ for query in queries],
+                    "status": status,
+                    "reason": cached_result.get("reason", "api_cache_hit"),
+                    "queue": should_queue,
+                    "matched_result": cached_result.get("matched_result"),
+                    "local_match": None,
+                    "query_results": cached_result.get("query_results", []),
+                    "cache_hit": True,
+                })
+                if self.debug:
+                    color = "green" if should_queue else "yellow"
+                    console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} (api_cache_hit)[/{color}]")
+                continue
+
             tracker_result = await self.provider.check_tracker(tracker_name, release, queries, content_profile)
             status = str(tracker_result.get("status") or "unknown")
             should_queue = status == "missing" or (status == "unknown" and include_unknown)
+            if api_cache_enabled and self._should_cache_status(status, search_config, target):
+                self._api_cache_store(api_cache, cache_key, tracker_name, content_profile, release, status, tracker_result)
             plan.append({
                 "tracker": tracker_name,
                 "path": candidate,
@@ -384,6 +428,7 @@ class SearchRunner:
                 "matched_result": tracker_result.get("matched_result"),
                 "local_match": None,
                 "query_results": tracker_result.get("queries", []),
+                "cache_hit": False,
             })
             if self.debug:
                 color = "green" if should_queue else "yellow"
@@ -402,6 +447,90 @@ class SearchRunner:
         except (TypeError, ValueError):
             threshold = self.matcher.fuzzy_size_threshold
         return max(0.0, min(threshold, 0.25))
+
+    def _api_cache_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
+        if "api_cache" in target:
+            return bool(target.get("api_cache"))
+        return bool(search_config.get("api_cache", True))
+
+    def _api_cache_ttl_days(self, search_config: dict[str, Any], target: dict[str, Any]) -> float:
+        value = target.get("api_cache_ttl_days", search_config.get("api_cache_ttl_days", 30))
+        try:
+            ttl_days = float(value)
+        except (TypeError, ValueError):
+            ttl_days = 30.0
+        return max(0.0, ttl_days)
+
+    def _api_cache_key(self, tracker_name: str, content_profile: str, release: ReleaseInfo) -> str:
+        release_key = self.matcher.normalize_release_name(release.release_name)
+        return "|".join([
+            tracker_name.upper(),
+            content_profile,
+            release_key,
+            str(release.size),
+        ])
+
+    def _api_cache_lookup(self, api_cache: dict[str, Any], cache_key: str, ttl_days: float) -> Optional[dict[str, Any]]:
+        entries = api_cache.get("entries")
+        if not isinstance(entries, dict):
+            return None
+        entry = entries.get(cache_key)
+        if not isinstance(entry, dict):
+            return None
+        checked_at = entry.get("checked_at")
+        try:
+            checked_at_float = float(checked_at)
+        except (TypeError, ValueError):
+            return None
+        if ttl_days > 0 and (time.time() - checked_at_float) > ttl_days * 86400:
+            return None
+        return entry
+
+    def _api_cache_store(
+        self,
+        api_cache: dict[str, Any],
+        cache_key: str,
+        tracker_name: str,
+        content_profile: str,
+        release: ReleaseInfo,
+        status: str,
+        tracker_result: dict[str, Any],
+    ) -> None:
+        entries = api_cache.setdefault("entries", {})
+        if not isinstance(entries, dict):
+            api_cache["entries"] = {}
+            entries = api_cache["entries"]
+        entries[cache_key] = {
+            "tracker": tracker_name,
+            "content": content_profile,
+            "release": release.to_dict(),
+            "status": status,
+            "reason": tracker_result.get("reason"),
+            "matched_result": tracker_result.get("matched_result"),
+            "query_results": tracker_result.get("queries", []),
+            "checked_at": time.time(),
+        }
+
+    def _should_cache_status(self, status: str, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
+        if status in {"exists", "missing"}:
+            return True
+        cache_unknown = target.get("api_cache_unknown", search_config.get("api_cache_unknown", False))
+        return bool(cache_unknown)
+
+    async def _load_api_cache(self, cache_file: Path) -> dict[str, Any]:
+        import asyncio
+
+        if not cache_file.exists():
+            return {"version": 1, "entries": {}}
+        try:
+            content = await asyncio.to_thread(cache_file.read_text, encoding="utf-8")
+            data = json.loads(content)
+            if isinstance(data, dict) and isinstance(data.get("entries"), dict):
+                data["version"] = data.get("version", 1)
+                return data
+        except (OSError, json.JSONDecodeError):
+            pass
+        return {"version": 1, "entries": {}}
 
     def _unique_destination(self, destination_root: Path, source: Path) -> Path:
         destination = destination_root / source.name

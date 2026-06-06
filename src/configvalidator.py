@@ -639,6 +639,19 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                 section="SEARCH"
             ))
 
+    api_cache_ttl_days = search.get("api_cache_ttl_days")
+    if api_cache_ttl_days is not None:
+        try:
+            ttl_days = float(api_cache_ttl_days)
+            if ttl_days < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            warnings.append(ConfigValidationWarning(
+                "'api_cache_ttl_days' should be a number greater than or equal to 0",
+                key="api_cache_ttl_days",
+                section="SEARCH"
+            ))
+
     libraries = search.get("libraries", {})
     if libraries is not None and not isinstance(libraries, dict):
         warnings.append(ConfigValidationWarning(
@@ -714,6 +727,18 @@ def _validate_search_section(search: dict[str, Any]) -> tuple[list[str], list[Co
                         except (TypeError, ValueError):
                             warnings.append(ConfigValidationWarning(
                                 f"Target '{tracker}' local_size_threshold should be a number between 0 and 0.25",
+                                key=str(tracker),
+                                section="SEARCH"
+                            ))
+                    target_api_cache_ttl_days = target.get("api_cache_ttl_days")
+                    if target_api_cache_ttl_days is not None:
+                        try:
+                            ttl_days = float(target_api_cache_ttl_days)
+                            if ttl_days < 0:
+                                raise ValueError
+                        except (TypeError, ValueError):
+                            warnings.append(ConfigValidationWarning(
+                                f"Target '{tracker}' api_cache_ttl_days should be a number greater than or equal to 0",
                                 key=str(tracker),
                                 section="SEARCH"
                             ))

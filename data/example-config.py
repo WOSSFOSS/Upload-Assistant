@@ -982,6 +982,12 @@ config = {
         # Queues and search cache are stored outside tmp so temporary upload metadata can be cleaned safely.
         "queue_dir": "data/queues",
         "cache_dir": "data/search_cache",
+        # Cache tracker API search results between runs to avoid repeating the same API calls.
+        # Set api_cache_ttl_days to 0 to keep cached results indefinitely.
+        # Unknown/error results are not cached by default, so temporary tracker/API issues are retried next run.
+        "api_cache": True,
+        "api_cache_ttl_days": 30,
+        "api_cache_unknown": False,
         # Conservative matching keeps false positives low; later tracker API checks use this threshold for size comparisons.
         "match_mode": "conservative",
         "fuzzy_size_threshold": 0.02,
