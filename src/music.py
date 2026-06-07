@@ -174,7 +174,7 @@ class MusicProcessor:
             "tvdb_id": 0,
             "tvmaze_id": 0,
             "mal_id": 0,
-            "resolution": "OTHER",
+            #"resolution": "OTHER",
             "sd": 1,
             "type": media_type,
             "source": source,
