@@ -2,6 +2,8 @@ import asyncio
 import json
 import os
 import re
+import difflib
+import unicodedata
 from pathlib import Path
 from typing import Any, Optional
 
@@ -105,6 +107,81 @@ def _duration_seconds(value: Any) -> Optional[int]:
 def _strip_discogs_suffix(value: str) -> str:
     return re.sub(r"\s+\(\d+\)$", "", value).strip()
 
+### discogs validation helpers to prevent false matches when looking up releases by artist and album
+def _normalize_music_match_value(value: Any) -> str:
+    text = _strip_discogs_suffix(_mi_value(value))
+    text = unicodedata.normalize("NFKD", text)
+    text = "".join(ch for ch in text if not unicodedata.combining(ch))
+    text = text.lower()
+
+    # Remove common noise that often differs between local tags and APIs.
+    text = re.sub(r"\b(the|a|an)\b", " ", text)
+    text = re.sub(r"\b(remaster(?:ed)?|deluxe|expanded|anniversary|edition|version)\b", " ", text)
+    text = re.sub(r"\b\d{4}\s*(remaster(?:ed)?)?\b", " ", text)
+
+    # Normalize separators/punctuation.
+    text = text.replace("&", " and ")
+    text = re.sub(r"[^a-z0-9]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _music_match_ratio(left: Any, right: Any) -> float:
+    left_norm = _normalize_music_match_value(left)
+    right_norm = _normalize_music_match_value(right)
+
+    if not left_norm or not right_norm:
+        return 0.0
+
+    if left_norm == right_norm:
+        return 1.0
+
+    # Allow "album" vs "album deluxe edition" etc.
+    if left_norm in right_norm or right_norm in left_norm:
+        shorter = min(len(left_norm), len(right_norm))
+        longer = max(len(left_norm), len(right_norm))
+        return max(0.86, shorter / longer)
+
+    return difflib.SequenceMatcher(None, left_norm, right_norm).ratio()
+
+
+def _discogs_release_artist_names(release: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+
+    artists_sort = _mi_value(release.get("artists_sort"))
+    if artists_sort:
+        names.append(artists_sort)
+
+    artists = release.get("artists") or []
+    for artist in artists:
+        if not isinstance(artist, dict):
+            continue
+        name = _strip_discogs_suffix(_mi_value(artist.get("name")))
+        if name and name not in names:
+            names.append(name)
+
+    return names
+
+
+def _discogs_release_title(release: dict[str, Any]) -> str:
+    return _mi_value(release.get("title"))
+
+
+def _discogs_match_score(request_artist: str, request_album: str, release: dict[str, Any]) -> tuple[float, float]:
+    release_title = _discogs_release_title(release)
+    album_score = _music_match_ratio(request_album, release_title)
+
+    release_artists = _discogs_release_artist_names(release)
+    artist_score = max((_music_match_ratio(request_artist, artist) for artist in release_artists), default=0.0)
+
+    return artist_score, album_score
+
+
+def _is_valid_discogs_match(request_artist: str, request_album: str, release: dict[str, Any]) -> bool:
+    artist_score, album_score = _discogs_match_score(request_artist, request_album, release)
+
+    # Strict enough to reject random Discogs hits, but tolerant of punctuation,
+    # accents, "The", remaster suffixes, etc.
+    return artist_score >= 0.72 and album_score >= 0.72
 
 class MusicProcessor:
     def __init__(self, config: dict[str, Any], base_dir: str) -> None:
@@ -509,13 +586,53 @@ class MusicProcessor:
             album = meta.get("album", "")
             if not artist or not album:
                 return None
+
+            # temp false match fix and added a 5 page lookup to find a match which validates with the given input
             search = await self._get_json("https://api.discogs.com/database/search", {
-                "q": f"{artist} {album}", "type": "release", "per_page": "1",
+                "q": f"{artist} {album}",
+                "type": "release",
+                "per_page": "5",
             })
             results = search.get("results", []) if search else []
             if not results:
                 return None
-            release = await self._get_json(f"https://api.discogs.com/releases/{results[0].get('id')}")
+
+            release = None
+            best_rejected: tuple[float, float, str, str] | None = None
+
+            for result in results:
+                result_id = result.get("id") if isinstance(result, dict) else None
+                if not result_id:
+                    continue
+
+                candidate = await self._get_json(f"https://api.discogs.com/releases/{result_id}")
+                if not candidate:
+                    continue
+
+                artist_score, album_score = _discogs_match_score(artist, album, candidate)
+                if _is_valid_discogs_match(artist, album, candidate):
+                    release = candidate
+                    break
+
+                if best_rejected is None or (artist_score + album_score) > (best_rejected[0] + best_rejected[1]):
+                    best_rejected = (
+                        artist_score,
+                        album_score,
+                        ", ".join(_discogs_release_artist_names(candidate)),
+                        _discogs_release_title(candidate),
+                    )
+
+            if not release:
+                if self.config.get("DEFAULT", {}).get("debug", False) and best_rejected:
+                    console.print(
+                        "[yellow]No acceptable Discogs match found: "
+                        f"requested='{artist} - {album}', "
+                        f"best='{best_rejected[2]} - {best_rejected[3]}', "
+                        f"artist_score={best_rejected[0]:.2f}, album_score={best_rejected[1]:.2f}[/yellow]"
+                    )
+                return None
+    
+
         if not release:
             return None
         artists = release.get("artists", [])
