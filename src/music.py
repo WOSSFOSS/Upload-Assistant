@@ -107,7 +107,7 @@ def _duration_seconds(value: Any) -> Optional[int]:
 def _strip_discogs_suffix(value: str) -> str:
     return re.sub(r"\s+\(\d+\)$", "", value).strip()
 
-### discogs validation helpers to prevent false matches when looking up releases by artist and album
+### music metadata validation helpers to prevent false matches when looking up releases by artist and album
 def _normalize_music_match_value(value: Any) -> str:
     text = _strip_discogs_suffix(_mi_value(value))
     text = unicodedata.normalize("NFKD", text)
@@ -182,6 +182,97 @@ def _is_valid_discogs_match(request_artist: str, request_album: str, release: di
     # Strict enough to reject random Discogs hits, but tolerant of punctuation,
     # accents, "The", remaster suffixes, etc.
     return artist_score >= 0.72 and album_score >= 0.72
+
+def _musicbrainz_release_artist_names(release: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+
+    artist_credit = release.get("artist-credit") or []
+    for credit in artist_credit:
+        if not isinstance(credit, dict):
+            continue
+        artist_data = credit.get("artist")
+        artist_name = artist_data.get("name") if isinstance(artist_data, dict) else ""
+        name = _mi_value(credit.get("name"), artist_name)
+        if name and name not in names:
+            names.append(name)
+
+    artist = release.get("artist")
+    if isinstance(artist, dict):
+        name = _mi_value(artist.get("name"))
+        if name and name not in names:
+            names.append(name)
+    elif isinstance(artist, str) and artist and artist not in names:
+        names.append(artist)
+
+    return names
+
+
+def _musicbrainz_release_title(release: dict[str, Any]) -> str:
+    return _mi_value(release.get("title"))
+
+
+def _musicbrainz_match_score(request_artist: str, request_album: str, release: dict[str, Any]) -> tuple[float, float]:
+    release_title = _musicbrainz_release_title(release)
+    album_score = _music_match_ratio(request_album, release_title)
+
+    release_artists = _musicbrainz_release_artist_names(release)
+    artist_score = max((_music_match_ratio(request_artist, artist) for artist in release_artists), default=0.0)
+
+    return artist_score, album_score
+
+
+def _is_valid_musicbrainz_match(request_artist: str, request_album: str, release: dict[str, Any]) -> bool:
+    artist_score, album_score = _musicbrainz_match_score(request_artist, request_album, release)
+
+    # Same threshold as Discogs validation: reject obvious false positives,
+    # but allow minor spelling, punctuation, accent and edition differences.
+    return artist_score >= 0.72 and album_score >= 0.72
+
+
+def _deezer_album_artist_names(album_data: dict[str, Any]) -> list[str]:
+    names: list[str] = []
+
+    artist = album_data.get("artist")
+    if isinstance(artist, dict):
+        name = _mi_value(artist.get("name"))
+        if name:
+            names.append(name)
+    elif isinstance(artist, str) and artist:
+        names.append(artist)
+
+    contributors = album_data.get("contributors") or []
+    for contributor in contributors:
+        if not isinstance(contributor, dict):
+            continue
+        name = _mi_value(contributor.get("name"))
+        if name and name not in names:
+            names.append(name)
+
+    return names
+
+
+def _deezer_album_title(album_data: dict[str, Any]) -> str:
+    return _mi_value(album_data.get("title"))
+
+
+def _deezer_match_score(request_artist: str, request_album: str, album_data: dict[str, Any]) -> tuple[float, float]:
+    album_title = _deezer_album_title(album_data)
+    album_score = _music_match_ratio(request_album, album_title)
+
+    album_artists = _deezer_album_artist_names(album_data)
+    artist_score = max((_music_match_ratio(request_artist, artist) for artist in album_artists), default=0.0)
+
+    return artist_score, album_score
+
+
+def _is_valid_deezer_match(request_artist: str, request_album: str, album_data: dict[str, Any]) -> bool:
+    artist_score, album_score = _deezer_match_score(request_artist, request_album, album_data)
+
+    # Keep this aligned with Discogs/MusicBrainz so all automatic lookups
+    # reject results that do not resemble the requested artist and album.
+    return artist_score >= 0.72 and album_score >= 0.72
+
+
 
 class MusicProcessor:
     def __init__(self, config: dict[str, Any], base_dir: str) -> None:
@@ -508,9 +599,34 @@ class MusicProcessor:
         releases = search.get("releases", []) if search else []
         if not releases:
             return None
-        best = releases[0]
-        mbid = best.get("id")
-        return await self._musicbrainz_release(mbid) if mbid else None
+        best_rejected: tuple[float, float, str, str] | None = None
+
+        for candidate in releases:
+            if not isinstance(candidate, dict):
+                continue
+
+            artist_score, album_score = _musicbrainz_match_score(artist, album, candidate)
+            if not _is_valid_musicbrainz_match(artist, album, candidate):
+                if best_rejected is None or (artist_score + album_score) > (best_rejected[0] + best_rejected[1]):
+                    best_rejected = (
+                        artist_score,
+                        album_score,
+                        ", ".join(_musicbrainz_release_artist_names(candidate)),
+                        _musicbrainz_release_title(candidate),
+                    )
+                continue
+
+            mbid = candidate.get("id")
+            return await self._musicbrainz_release(mbid) if mbid else None
+
+        if self.config.get("DEFAULT", {}).get("debug", False) and best_rejected:
+            console.print(
+                "[yellow]No acceptable MusicBrainz match found: "
+                f"requested='{artist} - {album}', "
+                f"best='{best_rejected[2]} - {best_rejected[3]}', "
+                f"artist_score={best_rejected[0]:.2f}, album_score={best_rejected[1]:.2f}[/yellow]"
+            )
+        return None
 
     async def _musicbrainz_release(self, mbid: str) -> Optional[dict[str, Any]]:
         release = await self._get_json(f"https://musicbrainz.org/ws/2/release/{mbid}", {
@@ -676,6 +792,7 @@ class MusicProcessor:
                 return {
                     "id": data.get("id", ""),
                     "title": data.get("title", ""),
+                    "artist": data.get("artist", {}).get("name", "") if isinstance(data.get("artist"), dict) else "",
                     "link": data.get("link", ""),
                     "cover": data.get("cover_big") or data.get("cover_xl") or data.get("cover", ""),
                     "genres": [g.get("name", "") for g in data.get("genres", {}).get("data", []) if isinstance(g, dict)],
@@ -685,18 +802,50 @@ class MusicProcessor:
         if not artist or not album:
             return None
         search = await self._get_json("https://api.deezer.com/search/album", {
-            "q": f'artist:"{artist}" album:"{album}"', "limit": "1",
+            "q": f'artist:"{artist}" album:"{album}"',
+            "limit": "5",
         })
         results = search.get("data", []) if search else []
         if not results:
             return None
-        album_id = results[0].get("id")
-        data = await self._get_json(f"https://api.deezer.com/album/{album_id}") if album_id else None
+
+        data = None
+        best_rejected: tuple[float, float, str, str] | None = None
+
+        for candidate in results:
+            if not isinstance(candidate, dict):
+                continue
+
+            artist_score, album_score = _deezer_match_score(artist, album, candidate)
+            if not _is_valid_deezer_match(artist, album, candidate):
+                if best_rejected is None or (artist_score + album_score) > (best_rejected[0] + best_rejected[1]):
+                    best_rejected = (
+                        artist_score,
+                        album_score,
+                        ", ".join(_deezer_album_artist_names(candidate)),
+                        _deezer_album_title(candidate),
+                    )
+                continue
+
+            album_id = candidate.get("id")
+            data = await self._get_json(f"https://api.deezer.com/album/{album_id}") if album_id else None
+            if data:
+                break
+
         if not data:
+            if self.config.get("DEFAULT", {}).get("debug", False) and best_rejected:
+                console.print(
+                    "[yellow]No acceptable Deezer match found: "
+                    f"requested='{artist} - {album}', "
+                    f"best='{best_rejected[2]} - {best_rejected[3]}', "
+                    f"artist_score={best_rejected[0]:.2f}, album_score={best_rejected[1]:.2f}[/yellow]"
+                )
             return None
+
         return {
             "id": data.get("id", ""),
             "title": data.get("title", ""),
+            "artist": data.get("artist", {}).get("name", "") if isinstance(data.get("artist"), dict) else "",
             "link": data.get("link", ""),
             "cover": data.get("cover_big") or data.get("cover_xl") or data.get("cover", ""),
             "genres": [g.get("name", "") for g in data.get("genres", {}).get("data", []) if isinstance(g, dict)],
