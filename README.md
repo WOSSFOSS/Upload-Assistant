@@ -38,7 +38,7 @@ Many thanks to all who have contributed.
 
 |Name|Acronym|Name|Acronym|
 |-|:-:|-|:-:|
-|Aither|AITHER|Alpharatio|AR|
+|Zenith (!)|ZNTH|Aither|AITHER|
 |Amigos-Share|ASC|Anthelion|ANT|
 |AsianCinema|ACM|Aura4K|A4K|
 |AvistaZ|AZ|Beyond-HD|BHD|
@@ -72,7 +72,7 @@ Many thanks to all who have contributed.
 |Torrenteros|TTR|TorrentLeech|TL|
 |TVChaosUK|TVC|ULCX|ULCX|
 |UTOPIA|UTP|YOiNKED|YOINK|
-|YUSCENE|YUS|||
+|YUSCENE|YUS|Alpharatio|AR|
 
 ## **Setup:**
    - **REQUIRES AT LEAST PYTHON 3.9 AND PIP3**
