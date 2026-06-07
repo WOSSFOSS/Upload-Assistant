@@ -518,8 +518,8 @@ class UNIT3D:
             merged.update(r)
 
         if meta.get("is_music") or meta.get("is_book"):
-    m       erged.pop("resolution_id", None)
-    
+            merged.pop("resolution_id", None)
+
         if meta.get("is_book") and merged.get("type_id") == "0":
             merged.pop("type_id", None)
 
