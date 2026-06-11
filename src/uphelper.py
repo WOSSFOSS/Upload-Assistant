@@ -687,6 +687,10 @@ class UploadHelper:
             if meta.get('mam_link'):
                 console.print(f"[bold]MyAnonamouse:[/bold] {meta['mam_link']}")
             console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
+            if meta.get('unattended', False) and not meta.get('unattended_confirm', False) and not meta.get('emby_debug', False):
+                if meta['debug'] is True:
+                    console.print("[bold yellow]Unattended mode is enabled, skipping confirmation.[/bold yellow]")
+                return True
             confirm_input = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N/skip[/yellow]: ").strip().lower()
             return "skip" if confirm_input in {"s", "skip"} else confirm_input == 'y'
         if meta.get('category') == 'MUSIC' or meta.get('is_music'):
@@ -719,6 +723,10 @@ class UploadHelper:
             if meta.get('deezer_info', {}).get('link'):
                 console.print(f"[bold]Deezer:[/bold] {meta['deezer_info']['link']}")
             console.print(f"[bold]Size:[/bold] {self._format_source_size(meta.get('source_size'))}")
+            if meta.get('unattended', False) and not meta.get('unattended_confirm', False) and not meta.get('emby_debug', False):
+                if meta['debug'] is True:
+                    console.print("[bold yellow]Unattended mode is enabled, skipping confirmation.[/bold yellow]")
+                return True
             confirm_input = console.input("[bold green]Is this correct?[/bold green] [yellow]y/N/skip[/yellow]: ").strip().lower()
             return "skip" if confirm_input in {"s", "skip"} else confirm_input == 'y'
         console.print()
