@@ -1,4 +1,5 @@
 import asyncio
+import io
 import os
 import re
 from pathlib import Path
@@ -7,6 +8,7 @@ from typing import Any
 import aiofiles
 import cli_ui
 import httpx
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from src.console import console
 from src.trackers.COMMON import COMMON
@@ -14,6 +16,9 @@ from src.trackers.UNIT3D import UNIT3D
 
 
 class ZNTH(UNIT3D):
+    COVER_MAX_BYTES = 256 * 1024
+    COVER_MAX_DIMENSION = 900
+
     def __init__(self, config: dict[str, Any]):
         super().__init__(config, tracker_name='ZNTH')
         self.config = config
@@ -220,20 +225,60 @@ class ZNTH(UNIT3D):
 
         cover_path = Path(cover)
         if await asyncio.to_thread(cover_path.exists):
-            return await self._cover_file_payload(cover_path)
+            return await self._cover_file_payload(meta, cover_path)
 
         if cover.startswith(('http://', 'https://')):
             downloaded_cover = await self._download_cover(meta, cover)
             if downloaded_cover:
-                return await self._cover_file_payload(downloaded_cover)
+                return await self._cover_file_payload(meta, downloaded_cover)
 
         return {}
 
-    async def _cover_file_payload(self, cover_path: Path) -> dict[str, tuple[str, bytes, str]]:
-        mime = self._cover_mime_type(cover_path)
-        async with aiofiles.open(cover_path, 'rb') as cover_file:
-            cover_bytes = await cover_file.read()
-        return {'torrent-cover': (cover_path.name, cover_bytes, mime)}
+    async def _cover_file_payload(self, meta: dict[str, Any], cover_path: Path) -> dict[str, tuple[str, bytes, str]]:
+        try:
+            cover_bytes = await asyncio.to_thread(self._prepare_cover_bytes, cover_path)
+        except (OSError, UnidentifiedImageError) as e:
+            if meta.get('debug'):
+                console.print(f"[yellow]ZNTH: Skipping invalid cover image: {e}[/yellow]")
+            return {}
+
+        if len(cover_bytes) > self.COVER_MAX_BYTES:
+            if meta.get('debug'):
+                console.print(
+                    "[yellow]ZNTH: Skipping torrent-cover because it is still too large "
+                    f"({len(cover_bytes) / 1024:.1f} KiB > {self.COVER_MAX_BYTES / 1024:.0f} KiB).[/yellow]"
+                )
+            return {}
+
+        if meta.get('debug'):
+            console.print(f"[cyan]ZNTH: Attaching torrent-cover ({len(cover_bytes) / 1024:.1f} KiB).[/cyan]")
+        return {'torrent-cover': (f'{cover_path.stem}.jpg', cover_bytes, 'image/jpeg')}
+
+    def _prepare_cover_bytes(self, cover_path: Path) -> bytes:
+        with Image.open(cover_path) as image:
+            image = ImageOps.exif_transpose(image)
+            image.thumbnail((self.COVER_MAX_DIMENSION, self.COVER_MAX_DIMENSION), Image.Resampling.LANCZOS)
+
+            if image.mode in ('RGBA', 'LA') or (image.mode == 'P' and 'transparency' in image.info):
+                background = Image.new('RGB', image.size, (255, 255, 255))
+                background.paste(image, mask=image.convert('RGBA').split()[-1])
+                image = background
+            elif image.mode != 'RGB':
+                image = image.convert('RGB')
+
+            for max_dimension in (self.COVER_MAX_DIMENSION, 700, 500):
+                resized = image.copy()
+                resized.thumbnail((max_dimension, max_dimension), Image.Resampling.LANCZOS)
+                for quality in (85, 75, 65, 55):
+                    output = io.BytesIO()
+                    resized.save(output, format='JPEG', quality=quality, optimize=True, progressive=True)
+                    cover_bytes = output.getvalue()
+                    if len(cover_bytes) <= self.COVER_MAX_BYTES:
+                        return cover_bytes
+
+            output = io.BytesIO()
+            image.save(output, format='JPEG', quality=50, optimize=True, progressive=True)
+            return output.getvalue()
 
     async def _download_cover(self, meta: dict[str, Any], cover_url: str) -> Path | None:
         suffix = Path(cover_url.split('?', 1)[0]).suffix.lower()
