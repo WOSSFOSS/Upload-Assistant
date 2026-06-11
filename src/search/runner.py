@@ -597,17 +597,24 @@ class SearchRunner:
                 skipped_disc_roots.add(item)
                 continue
             if item.is_file():
-                self._add_candidate(item, candidates, seen, content_profile)
+                self._add_candidate(item, candidates, seen, content_profile, scan_root=root)
         if scanned and progress_interval > 0:
             console.print(f"[dim]{label}: scanned {scanned} filesystem item(s), found {len(candidates)} candidate(s)[/dim]")
         return scanned
 
-    def _add_candidate(self, path: Path, candidates: list[str], seen: set[str], content_profile: str = "generic") -> None:
+    def _add_candidate(
+        self,
+        path: Path,
+        candidates: list[str],
+        seen: set[str],
+        content_profile: str = "generic",
+        scan_root: Path | None = None,
+    ) -> None:
         suffix = path.suffix.lower()
         if self._is_sample_file(path):
             return
         if content_profile == "movie":
-            if suffix not in VIDEO_EXTENSIONS or self._looks_like_tv_episode_path(path):
+            if suffix not in VIDEO_EXTENSIONS or self._looks_like_tv_episode_path(path, scan_root):
                 return
         elif content_profile == "tv":
             if suffix not in VIDEO_EXTENSIONS or not self._is_daily_episode_name(path.name):
@@ -742,12 +749,35 @@ class SearchRunner:
             return True
         return any(part.lower() == "sample" for part in path.parts)
 
-    def _looks_like_tv_episode_path(self, path: Path) -> bool:
+    def _looks_like_tv_episode_path(self, path: Path, scan_root: Path | None = None) -> bool:
         if self._is_episode_name(path.name):
             return True
-        if any(self._is_episode_name(parent.name) or self._is_season_pack_name(parent.name) for parent in path.parents):
+        relevant_parents = self._parents_within_scan_root(path, scan_root)
+        if any(self._is_episode_name(parent.name) or self._is_season_pack_name(parent.name) for parent in relevant_parents):
             return True
+        if scan_root is not None and path.parent.resolve() == scan_root.resolve():
+            return False
         return self._parent_looks_like_tv_pack(path)
+
+    def _parents_within_scan_root(self, path: Path, scan_root: Path | None) -> list[Path]:
+        if scan_root is None:
+            return list(path.parents)
+        try:
+            resolved_root = scan_root.resolve()
+        except OSError:
+            resolved_root = scan_root
+        parents: list[Path] = []
+        for parent in path.parents:
+            try:
+                resolved_parent = parent.resolve()
+            except OSError:
+                resolved_parent = parent
+            if resolved_parent == resolved_root:
+                break
+            if resolved_root not in resolved_parent.parents:
+                break
+            parents.append(parent)
+        return parents
 
     def _parent_looks_like_tv_pack(self, path: Path) -> bool:
         parent = path.parent
@@ -1378,7 +1408,7 @@ class SearchRunner:
             return None
         if not isinstance(data, dict):
             return None
-        if int(data.get("version") or 0) < 2:
+        if int(data.get("version") or 0) < 3:
             return None
         if str(data.get("tracker") or "").upper() != tracker_name:
             return None
@@ -1421,7 +1451,7 @@ class SearchRunner:
         home_paths: list[Path],
     ) -> None:
         await self._write_json(path, {
-            "version": 2,
+            "version": 3,
             "stage": stage,
             "tracker": tracker_name,
             "profile": profile_name,
