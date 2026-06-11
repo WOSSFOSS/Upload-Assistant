@@ -8,6 +8,77 @@
 
 Discord support https://discord.gg/QHHAZu7e2A
 
+# Current Fork Highlights
+
+This fork contains a number of newer workflow improvements on top of the original Upload Assistant behavior. The older README is kept below this section for the general project overview, setup notes, supported tracker list, and Docker information.
+
+## Major Additions
+
+- **Music upload support**
+  - Music uploads can be prepared from tagged audio files.
+  - MusicBrainz, Discogs, and Deezer metadata are used where available.
+  - Generated descriptions include cover art, release info, tracklist, total duration, logs, and external links.
+  - Supported UNIT3D trackers can receive cover files through tracker-specific API fields such as `torrent-cover`.
+
+- **Book and audiobook support**
+  - eBooks and audiobooks are detected and named separately from video/music uploads.
+  - Google Books, Open Library, and optional Audible lookup support can enrich metadata.
+  - eBook formats such as EPUB/AZW3/MOBI/PDF/CBZ/CBR can be included in naming and descriptions.
+  - Audiobook naming supports narrator/series/abridged state, bitrate mode, ISBN/ASIN, and retail flags where available.
+
+- **Search mode / upload queue discovery** (still experimental)
+  - `python3 upload.py --search` scans configured source libraries, checks target trackers, and writes UA queue files for missing uploads.
+  - Search profiles are configured in `data/config.py` under `SEARCH`.
+  - Source and home library scans are cached separately:
+    - source scan cache is queue-specific;
+    - home scan cache is tracker/profile-specific.
+  - `--prepare-search-cache` can be used for cron-friendly scan/TMDB cache preparation without tracker API searches.
+  - `--refresh-scan` ignores scan cache for the current run.
+  - `--rescan` deletes the current source/home scan checkpoints before scanning.
+  - Search uses local prefiltering, torrent-file index checks where available, TMDB/IMDb lookup caching, tracker API checks, and UA's dupe filtering logic.
+
+- **Torrent file search/index improvements**
+  - UA can reuse existing `.torrent` files from qBittorrent `BT_backup`/torrent storage directories.
+  - File-based torrent search can be cached in a local index to avoid repeatedly scanning huge client folders.
+  - Matching torrent information now shows useful details such as piece size, piece count, and infohash.
+
+## Upload Workflow Improvements
+
+- The first metadata confirmation now shows more technical context:
+  - name,
+  - duration,
+  - video bitrate,
+  - audio tracks,
+  - included subtitles,
+  - file size.
+- The first confirmation supports skipping immediately, useful when processing large queues.
+- The metadata correction prompt allows returning/backing out instead of trapping the user in the edit loop.
+- Before upload, UA can warn about risky rule combinations such as:
+  - non-English audio without English subtitles,
+  - 1080p-or-lower x265/HEVC encodes where tracker rules may forbid them.
+- Supported trackers can be sent to mod queue/draft directly from the final upload confirmation, independent of the default config value.
+
+## Dupe And Tracker Check Improvements
+
+- Dupe output includes sizes and links where tracker APIs provide them.
+- Dupe sizes that closely match the current upload can be highlighted.
+- "Other uploads" are shown separately before the final upload confirmation so existing releases in the same group are visible even when they are not strict dupes.
+- "Other uploads" are sorted by resolution and can highlight releases with the same resolution as the current upload.
+- Image host validation/rehosting can be enforced per tracker where only certain hosts are allowed.
+- Several tracker-specific duplicate checks have been tightened, including Gazelle/UNIT3D/BHD-style responses.
+
+## CLI Documentation
+
+The CLI reference has been refreshed and moved/kept here:
+
+- [docs/cli-args.md](docs/cli-args.md)
+
+It includes the newer search, music, book/audiobook, torrent-client, and moderation/draft arguments.
+
+---
+
+# Original README
+
 # Upload Assistant
 
 A simple tool to take the work out of uploading.
