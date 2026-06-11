@@ -36,6 +36,10 @@ async def _read_text_lines(path: str) -> list[str]:
 
 
 class QueueManager:
+    VIDEO_EXTENSIONS = ['.mkv', '.mp4', '.ts']
+    MUSIC_EXTENSIONS = ['.flac', '.mp3', '.m4a', '.m4b', '.aac', '.alac', '.wav', '.aiff', '.aif', '.ape', '.ogg', '.opus', '.wv', '.tak']
+    BOOK_EXTENSIONS = ['.epub', '.azw', '.azw3', '.mobi', '.pdf', '.lit', '.cbz', '.cbr', '.mp3', '.m4a', '.m4b', '.aac', '.flac']
+
     @staticmethod
     def _resolve_queue_dir(base_dir: str, meta: Optional[Mapping[str, Any]] = None, queue_dir: Optional[str] = None) -> str:
         configured = queue_dir or (str(meta.get('queue_dir')) if meta and meta.get('queue_dir') else "")
@@ -55,6 +59,26 @@ class QueueManager:
         if preferred != legacy and not os.path.exists(preferred) and os.path.exists(legacy):
             return legacy
         return preferred
+
+    @staticmethod
+    def _allowed_extensions_for_meta(meta: Mapping[str, Any]) -> list[str]:
+        category = str(meta.get('manual_category') or meta.get('category') or '').upper()
+        if category == 'MUSIC' or meta.get('is_music'):
+            return QueueManager.MUSIC_EXTENSIONS
+        if category in {'BOOK', 'BOOKS', 'AUDIOBOOK', 'AUDIOBOOKS'} or meta.get('is_book') or meta.get('is_audiobook'):
+            return QueueManager.BOOK_EXTENSIONS
+        return QueueManager.VIDEO_EXTENSIONS
+
+    @staticmethod
+    def _should_prompt(meta: Mapping[str, Any]) -> bool:
+        return not meta.get('unattended') or (meta.get('unattended') and meta.get('unattended_confirm', False))
+
+    @staticmethod
+    def _recursive_directory_scan_for_meta(meta: Mapping[str, Any]) -> bool:
+        category = str(meta.get('manual_category') or meta.get('category') or '').upper()
+        return category in {'MUSIC', 'BOOK', 'BOOKS', 'AUDIOBOOK', 'AUDIOBOOKS'} or bool(
+            meta.get('is_music') or meta.get('is_book') or meta.get('is_audiobook')
+        )
 
     @staticmethod
     async def process_site_upload_queue(meta: Mapping[str, Any], base_dir: str) -> tuple[list[QueueItem], Optional[str]]:
@@ -170,6 +194,7 @@ class QueueManager:
     async def gather_files_recursive(
         path: Union[str, bytes],
         allowed_extensions: Optional[Sequence[str]] = None,
+        recursive_directory_scan: bool = False,
     ) -> list[str]:
         """
         Gather files and first-level subfolders.
@@ -196,7 +221,13 @@ class QueueManager:
             try:
                 for entry in os.scandir(normalized_path):
                     queue.extend(
-                        await QueueManager._process_scandir_entry(entry, normalized_path, allowed_extensions_tuple, allowed_extensions)
+                        await QueueManager._process_scandir_entry(
+                            entry,
+                            normalized_path,
+                            allowed_extensions_tuple,
+                            allowed_extensions,
+                            recursive_directory_scan,
+                        )
                     )
 
             except (OSError, PermissionError) as e:
@@ -217,6 +248,7 @@ class QueueManager:
         normalized_path: str,
         allowed_extensions_tuple: Optional[tuple[str, ...]],
         allowed_extensions: Optional[Sequence[str]],
+        recursive_directory_scan: bool = False,
     ) -> list[str]:
         entry_paths: list[str] = []
         try:
@@ -225,7 +257,7 @@ class QueueManager:
 
             if entry.is_dir():
                 # Check if this directory should be included
-                if await QueueManager.should_include_directory(entry_path, allowed_extensions):
+                if await QueueManager.should_include_directory(entry_path, allowed_extensions, recursive=recursive_directory_scan):
                     entry_paths.append(entry_path)
             elif entry.is_file() and (allowed_extensions_tuple is None or entry.name.lower().endswith(allowed_extensions_tuple)):
                 entry_paths.append(entry_path)
@@ -236,7 +268,14 @@ class QueueManager:
             try:
                 alt_path = os.path.join(normalized_path, entry.name)
                 if os.path.exists(alt_path) and (
-                    (os.path.isdir(alt_path) and await QueueManager.should_include_directory(alt_path, allowed_extensions))
+                    (
+                        os.path.isdir(alt_path)
+                        and await QueueManager.should_include_directory(
+                            alt_path,
+                            allowed_extensions,
+                            recursive=recursive_directory_scan,
+                        )
+                    )
                     or (
                         os.path.isfile(alt_path)
                         and (allowed_extensions_tuple is None or alt_path.lower().endswith(allowed_extensions_tuple))
@@ -249,7 +288,11 @@ class QueueManager:
         return entry_paths
 
     @staticmethod
-    async def should_include_directory(dir_path: str, allowed_extensions: Optional[Sequence[str]] = None) -> bool:
+    async def should_include_directory(
+        dir_path: str,
+        allowed_extensions: Optional[Sequence[str]] = None,
+        recursive: bool = False,
+    ) -> bool:
         """
         Check if a directory should be included in the queue.
         Returns True if the directory contains:
@@ -271,6 +314,10 @@ class QueueManager:
                 for entry in os.scandir(dir_path):
                     if entry.is_file() and entry.name.lower().endswith(allowed_extensions_tuple):
                         return True
+                    if recursive and entry.is_dir():
+                        for root, _dirs, files in os.walk(entry.path):
+                            if any(file.lower().endswith(allowed_extensions_tuple) for file in files):
+                                return True
             else:
                 # If no allowed_extensions specified, include any directory with files
                 for entry in os.scandir(dir_path):
@@ -410,7 +457,7 @@ class QueueManager:
         paths: Sequence[str],
         base_dir: str,
     ) -> tuple[QueueList, Optional[str]]:
-        allowed_extensions = ['.mkv', '.mp4', '.ts']
+        allowed_extensions = QueueManager._allowed_extensions_for_meta(meta)
         queue: list[str] = []
 
         if meta.get('site_upload'):
@@ -470,7 +517,11 @@ class QueueManager:
                 existing_queue = cast(list[str], await _read_json_file(log_file))
 
                 if os.path.exists(path):
-                    current_files = await QueueManager.gather_files_recursive(path, allowed_extensions=allowed_extensions)
+                    current_files = await QueueManager.gather_files_recursive(
+                        path,
+                        allowed_extensions=allowed_extensions,
+                        recursive_directory_scan=QueueManager._recursive_directory_scan_for_meta(meta),
+                    )
                 elif path and os.path.basename(path) != 'dummy_path_for_site_upload':
                     current_files = await QueueManager.resolve_queue_with_glob_or_split(path, paths, allowed_extensions=allowed_extensions)
                 else:
@@ -498,7 +549,7 @@ class QueueManager:
                         for file in sorted(removed_files):
                             console.print(f"  - {file}")
 
-                    if not meta['unattended'] or (meta['unattended'] and meta.get('unattended_confirm', False)):
+                    if QueueManager._should_prompt(meta):
                         console.print("[yellow]Do you want to update the queue log, edit, discard, or keep the existing queue?[/yellow]")
                         edit_choice_raw = cli_ui.ask_string("Enter 'u' to update, 'a' to add specific new files, 'e' to edit, 'd' to discard, or press Enter to keep it as is: ")
                         edit_choice = (edit_choice_raw or "").strip().lower()
@@ -552,7 +603,7 @@ class QueueManager:
                 else:
                     # No changes detected
                     console.print("[green]No changes detected in the queue.[/green]")
-                    if not meta['unattended'] or (meta['unattended'] and meta.get('unattended_confirm', False)):
+                    if QueueManager._should_prompt(meta):
                         console.print("[yellow]Do you want to edit, discard, or keep the existing queue?[/yellow]")
                         edit_choice_raw = cli_ui.ask_string("Enter 'e' to edit, 'd' to discard, or press Enter to keep it as is: ")
                         edit_choice = (edit_choice_raw or "").strip().lower()
@@ -583,26 +634,33 @@ class QueueManager:
                         queue = existing_queue
             else:
                 if os.path.exists(path):
-                    queue = await QueueManager.gather_files_recursive(path, allowed_extensions=allowed_extensions)
+                    queue = await QueueManager.gather_files_recursive(
+                        path,
+                        allowed_extensions=allowed_extensions,
+                        recursive_directory_scan=QueueManager._recursive_directory_scan_for_meta(meta),
+                    )
                 else:
                     queue = await QueueManager.resolve_queue_with_glob_or_split(path, paths, allowed_extensions=allowed_extensions)
 
                 console.print(f"[cyan]A new queue log file will be created:[/cyan] [green]{log_file}[/green]")
                 console.print(f"[cyan]The new queue will contain {len(queue)} items.[/cyan]")
-                console.print("[cyan]Do you want to edit the initial queue before saving?[/cyan]")
-                edit_choice_raw = cli_ui.ask_string("Enter 'e' to edit, or press Enter to save as is: ")
-                edit_choice = (edit_choice_raw or "").strip().lower()
+                if QueueManager._should_prompt(meta):
+                    console.print("[cyan]Do you want to edit the initial queue before saving?[/cyan]")
+                    edit_choice_raw = cli_ui.ask_string("Enter 'e' to edit, or press Enter to save as is: ")
+                    edit_choice = (edit_choice_raw or "").strip().lower()
 
-                if edit_choice == 'e':
-                    edited_content = click.edit(json.dumps(queue, indent=4))
-                    if edited_content:
-                        try:
-                            queue = json.loads(edited_content.strip())
-                            console.print("[bold green]Successfully updated the queue from the editor.")
-                        except json.JSONDecodeError as e:
-                            console.print(f"[bold red]Failed to parse the edited content: {e}. Using the original queue.")
-                    else:
-                        console.print("[bold red]No changes were made. Using the original queue.")
+                    if edit_choice == 'e':
+                        edited_content = click.edit(json.dumps(queue, indent=4))
+                        if edited_content:
+                            try:
+                                queue = json.loads(edited_content.strip())
+                                console.print("[bold green]Successfully updated the queue from the editor.")
+                            except json.JSONDecodeError as e:
+                                console.print(f"[bold red]Failed to parse the edited content: {e}. Using the original queue.")
+                        else:
+                            console.print("[bold red]No changes were made. Using the original queue.")
+                else:
+                    console.print("[bold green]Unattended mode is enabled. Saving initial queue as is.[/bold green]")
 
                 # Save the queue to the log file
                 await _write_json_file(log_file, queue, indent=4)
