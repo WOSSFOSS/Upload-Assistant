@@ -152,11 +152,10 @@ class MNS(UNIT3D):
         audio_languages = cast(list[str], audio_languages_value) if isinstance(audio_languages_value, list) else []
 
         # Language is included only when there is no English audio. Full discs are exempt.
-        if meta.get('is_disc') not in ["BDMV", "DVD"]:
-            if audio_languages and not await languages_manager.has_english_language(audio_languages):
-                foreign_lang = str(audio_languages[0]).upper()
-                if foreign_lang not in mns_name.upper():
-                    mns_name = mns_name.replace(f"{resolution}", f"{foreign_lang} {resolution}", 1)
+        if meta.get('is_disc') not in ["BDMV", "DVD"] and audio_languages and not await languages_manager.has_english_language(audio_languages):
+            foreign_lang = str(audio_languages[0]).upper()
+            if foreign_lang not in mns_name.upper():
+                mns_name = mns_name.replace(f"{resolution}", f"{foreign_lang} {resolution}", 1)
 
         if not meta.get('tag'):
             mns_name += "-NOGROUP"
