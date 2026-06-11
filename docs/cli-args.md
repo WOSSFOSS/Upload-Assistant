@@ -1,216 +1,218 @@
-# Upload Assistant CLI arguments
+# Upload Assistant CLI Arguments
 
 This document describes the command-line arguments parsed in `src/args.py`.
 
-## Help output
-
-- `-h` shows a short/curated help (common options only).
-- `--help` shows the full argparse help.
-
-## Basic usage
+## Usage
 
 ```text
-upload.py [path...] [options]
+python3 upload.py [path...] [options]
 ```
 
-- `path` (positional): One or more paths to a file or directory.
-  - Quoting is recommended (single or double quotes) especially when paths contain spaces.
-  - The parser has a small recovery mechanism: if extra “unknown” tokens were provided and the joined `path` doesn’t exist, it will append those tokens into the path until it finds an existing path.
+- `path`: one or more file or directory paths. Quoting paths is recommended.
+- `-h`: show short help with common options.
+- `--help`: show the full argparse help.
 
-### Validation rules
+At least one of `path`, `--queue`, `--site-upload`, `--search`, or `--webui` is required.
 
-- You must provide either at least one `path` OR `--site-upload`.
-- If `--site-upload` is provided without a `path`, the parser injects a dummy path internally (so downstream code can continue).
+## Queue And Search Modes
 
-## Modes / workflows
+- `--queue QUEUE_NAME`: process a named UA queue.
+- `-lq`, `--limit-queue N`: limit how many queue items are processed.
+- `--search`: run configured `SEARCH` profiles and create UA queue files.
+- `--search-profile PROFILE`: run one configured `SEARCH` profile. This implies `--search`.
+- `--refresh-scan`: ignore cached filesystem scan checkpoints for this run and write fresh checkpoints.
+- `--rescan`: delete the current source/home scan checkpoints before scanning.
+- `--prepare-search-cache`: update scan/TMDB/API cache files without tracker API searches or queue generation. This implies `--search`.
+- `-sc`, `--site-check`: search sites for suitable uploads and create a log file, without uploading.
+- `-su`, `--site-upload TRACKER`: process site search results and upload to a single tracker.
+- `--unit3d`: parse a text output file from UNIT3D-Upload-Checker.
 
-- `--queue QUEUE_NAME`: Process an entire folder (including files/subfolders) in a named queue.
-- `-lq`, `--limit-queue N`: Limit the amount of sucessfull uploads processed when running the queue (default `0` unlimited).
-- `-sc`, `--site-check`: Search trackers for suitable uploads and create a log file (no uploading).
-- `-su`, `--site-upload TRACKER`: Process site searches and upload to a single tracker (tracker acronym is uppercased).
-- `--unit3d`: Parse a text output file from `UNIT3D-Upload-Checker`.
+Search scan caches are split into source and home scan checkpoints. Source scans are queue-specific; home scans are tracker/profile-specific so stable home libraries can be reused across different source queues.
 
-## Screenshots / images
+## Core Metadata Overrides
 
-- `-s`, `--screens N`: Number of screenshots.
-  - Default comes from config: `DEFAULT.screens`.
-- `-mf`, `--manual_frames "1,250,500"`: Comma-separated frame numbers to use as screenshots.
-  - Parsed into a list of integers; invalid format exits.
-- `-comps`, `--comparison PATH`: Use comparison images from a folder.
-- `-comps_index`, `--comparison_index N`: Which comparison index is the “main” images (required when using `--comparison`).
-- `-menus`, `--disc-menus PATH`: Raw Disc only (Blu-ray/DVD). Folder containing disc menu screenshots (all images in folder are used).
-- `-ih`, `--imghost HOST`: Select image host.
-  - Choices: `imgbb`, `ptpimg`, `imgbox`, `pixhost`, `lensdump`, `ptscreens`, `onlyimage`, `dalexni`, `zipline`, `passtheimage`, `seedpool_cdn`, `utppm`.
-- `-siu`, `--skip-imagehost-upload`: Skip uploading images to an image host.
+- `-c`, `--category {movie,tv,fanres,music,book}`: override category.
+- `-t`, `--type TYPE`: override release type. Accepted values: `disc`, `remux`, `encode`, `webdl`, `web-dl`, `webrip`, `hdtv`, `dvdrip`, `flac`, `mp3`, `aac`, `alac`, `wav`, `epub`, `pdf`, `mobi`, `cbz`, `cbr`, `m4b`.
+- `--source SOURCE`: override source. Accepted values: `Blu-ray`, `BluRay`, `DVD`, `DVD5`, `DVD9`, `HDDVD`, `WEB`, `HDTV`, `UHDTV`, `LaserDisc`, `DCP`, `CD`, `VINYL`.
+- `-res`, `--resolution RES`: override resolution. Accepted values: `2160p`, `1080p`, `1080i`, `720p`, `576p`, `576i`, `480p`, `480i`, `8640p`, `4320p`, `other`.
+- `-year`, `--year YYYY`: override detected year.
+- `-g`, `--tag TAG`: override group tag. UA stores it with a leading dash.
+- `-serv`, `--service SERVICE`: override streaming service.
+- `-dist`, `--distributor NAME`: override disc distributor.
+- `-edition`, `--edition`, `--repack TEXT`: override edition/repack text.
 
-## Description inputs
+## External IDs
 
-- `-pb`, `--desclink URL`: Custom description link (hastebin/pastebin).
-- `-df`, `--descfile PATH`: Custom description file path (or filename in current working directory).
-  - Stored as an absolute path.
-- `-nfo`, `--nfo`: Use `.nfo` in directory for description.
+- `-tmdb`, `--tmdb ID`: set TMDB ID. Supports `movie/12345` and `tv/12345`.
+- `-imdb`, `--imdb ID`: set IMDb ID.
+- `-mal`, `--mal ID`: set MyAnimeList ID.
+- `-tvmaze`, `--tvmaze ID`: set TVMaze ID.
+- `-tvdb`, `--tvdb ID`: set TVDB ID.
 
-## Metadata overrides (IDs, category/type/source, title shaping)
+## Music Metadata
 
-- These will override what Upload Assistant automatically decides. Recommend to only use overrides when needed to correct automatic detection.
+- `-art`, `--artist ARTIST`: override music artist.
+- `-alb`, `--album ALBUM`: override music album.
+- `-mbid`, `--mbid ID`: set MusicBrainz release ID.
+- `-discogs`, `--discogs ID`: set Discogs release ID.
+- `-deezer`, `--deezer ID`: set Deezer album ID.
 
-### Category / type / source / resolution
+## Book And Audiobook Metadata
 
-- `-c`, `--category {movie,tv,fanres}`: Override the category.
-- `-t`, `--type {disc,remux,encode,webdl,web-dl,webrip,hdtv,dvdrip}`: Override release type.
-  - Stored as uppercase with `-` removed (e.g. `web-dl` → `WEBDL`).
-- `--source {Blu-ray,BluRay,DVD,DVD5,DVD9,HDDVD,WEB,HDTV,UHDTV,LaserDisc,DCP}`: Override the source string.
-- `-res`, `--resolution {2160p,1080p,1080i,720p,576p,576i,480p,480i,8640p,4320p,other}`: Override the resolution.
+- `-btitle`, `--book-title`, `--book_title TITLE`: override book/audiobook title.
+- `-author`, `--author AUTHOR`: override book/audiobook author.
+- `-narrator`, `--narrator NAME`: override audiobook narrator.
+- `-isbn`, `--isbn`, `--book-isbn`, `--book_isbn ISBN`: override ISBN.
+- `-blang`, `--book-language`, `--book_language LANG`: override book/audiobook language.
+- `-pub`, `--publisher PUBLISHER`: override publisher.
+- `--retail`: mark book/audiobook as retail.
+- `--scan`: mark eBook as scanned.
+- `--ocr`: mark eBook as OCR processed.
+- `--comic`: mark book upload as a comic.
+- `--magazine`: mark book upload as a magazine.
+- `--abridged`: mark audiobook as abridged.
+- `--unabridged`: mark audiobook as unabridged.
+- `--series SERIES`: set book/audiobook series name.
+- `--book-number`, `--book_number NUMBER`: set book/audiobook series number.
 
-### External IDs
+## TV And Title Shaping
 
-- `-tmdb`, `--tmdb TMDB_ID`: TMDb id; supports `movie/123` or `tv/123` forms.
-  - Also accepts TMDb URLs and extracts the id.
-  - Sets category based on `movie` vs `tv` when provided in that form.
-- `-imdb`, `--imdb IMDB_ID`: IMDb id.
-- `-mal`, `--mal MAL_ID`: MAL id.
-- `-tvmaze`, `--tvmaze TVMAZE_ID`: TVMaze id.
-- `-tvdb`, `--tvdb TVDB_ID`: TVDB id.
+- `-season`, `--season N`: override season.
+- `-episode`, `--episode N`: override episode.
+- `-met`, `--manual-episode-title TITLE`: override episode title. Passing the option without text sets an empty title.
+- `-daily`, `--daily YYYY-MM-DD`: set air date for daily-style TV episodes.
+- `--not-anime`: mark the release as not anime.
+- `--no-season`: remove season from title.
+- `--no-year`: remove year from title.
+- `--no-aka`: remove AKA from title.
+- `--no-dub`: remove dubbed marker from title.
+- `--no-dual`: remove dual-audio marker from title.
+- `--no-tag`: remove group tag from title.
+- `--no-edition`: remove edition from title.
+- `--dual-audio`: add dual-audio marker to title.
 
-Note: if a manual TMDb or IMDb id is present in the incoming `meta` before parsing, the parser clears `tmdb_manual`, `tmdb_id`, `tmdb`, `imdb_id`, `imdb` in `meta` so CLI values take precedence cleanly.
+## Language And Track Flags
 
-### Tags / edition / language
+- `-ol`, `--original-language LANG`: set original audio language.
+- `-oil`, `--only-if-languages LANG ...`: require at least one listed language.
+- `-mc`, `--commentary`: indicate commentary tracks are included.
+- `-sfxs`, `--sfx-subtitles`: indicate subtitles with visual effects/backgrounds are included.
+- `-hc`, `--hardcoded-subs`: indicate hardcoded subtitles.
 
-- `-g`, `--tag [GROUP ...]`: Group tag.
-  - Stored with a leading dash, e.g. `-g NTb` → `-NTb`.
-- `-serv`, `--service [SERVICE ...]`: Streaming service.
-- `-dist`, `--distributor [NAME ...]`: Disc distributor (Criterion, BFI, etc.).
-- `-edition`, `--edition`, `--repack [TEXT ...]`: Edition/repack string.
-- `-ol`, `--original-language LANG`: Set original audio language.
-- `-oil`, `--only-if-languages [LANG ...]`: Require at least one language to upload (comma-separated list in a single string is supported).
+## Screenshots And Images
 
-### TV fields
+- `-s`, `--screens N`: number of screenshots. Default comes from config.
+- `-mf`, `--manual_frames LIST`: comma-separated frame numbers to use for screenshots.
+- `-comps`, `--comparison PATH`: use comparison images from a folder.
+- `-comps_index`, `--comparison_index N`: choose which comparison index is the main image set.
+- `-menus`, `--disc-menus PATH`: raw disc only; folder containing disc menu screenshots.
+- `-ih`, `--imghost HOST`: choose image host. Accepted values: `imgbb`, `ptpimg`, `imgbox`, `pixhost`, `lensdump`, `ptscreens`, `onlyimage`, `dalexni`, `zipline`, `passtheimage`, `seedpool_cdn`, `utppm`.
+- `-siu`, `--skip-imagehost-upload`: skip uploading images to an image host.
 
-- `-season`, `--season N`: Season (string).
-  - Stored as `manual_season` in `meta`.
-- `-episode`, `--episode N`: Episode (string).
-  - Stored as `manual_episode` in `meta`.
-- `-met`, `--manual-episode-title [TITLE ...]`: Manual episode title.
-  - Passing the option with no words sets an empty string.
-- `-daily`, `--daily YYYY-MM-DD`: Air date (parsed via `datetime.date.fromisoformat`).
+## Description Inputs
 
-### Title shaping toggles
+- `-pb`, `--desclink URL`: custom description link.
+- `-df`, `--descfile PATH`: custom description file path.
+- `-nfo`, `--nfo`: use `.nfo` in the directory for description.
+- `-k`, `--keywords TEXT`: add comma-separated keywords.
 
-- `--no-season`: Remove Season from title.
-- `--no-year`: Remove Year from title.
-- `--no-aka`: Remove AKA from title.
-- `--no-dub`: Remove Dubbed from title.
-- `--no-dual`: Remove Dual-Audio from title.
-- `--no-tag`: Remove Group Tag from title.
-- `--no-edition`: Remove Edition from title.
-- `--dual-audio`: Add Dual-Audio to the title.
+## Existing Tracker/Torrent References
 
-### Misc metadata flags
+These options accept an ID or URL where supported and are used to pull metadata from existing tracker uploads.
 
-- `--not-anime`: Manually mark release as not anime. NOTE: invokes a quicker processing path for TV content when metadata ids (such as TMDB) are also provided.
-- `-year`, `--year YYYY`: Override the year found.
-- `-mc`, `--commentary`: Manually indicate commentary tracks are included.
-- `-sfxs`, `--sfx-subtitles`: Manually indicate “SFX subtitles” are included.
-- `-e`, `--extras`: Indicates extras are included (mainly Blu-ray discs).
-- `-sort`, `--sorted-filelist`: Use the largest video file instead of the first video file found. NOTE: useful for anime content when additional content is present in a folder.
-- `-kf`, `--keep-folder`: Keep the folder containing the single file (only when supplying a directory).
-- `-knfo`, `--keep-nfo`: Keep nfo file where applicable for specific tracker/s. With single files, must be used in conjunction with `--keep-folder` above.
-- `-reg`, `--region REGION`: Region for discs.
+- `-ptp`, `--ptp ID_OR_URL`: PTP torrent ID/permalink.
+- `-blu`, `--blu ID_OR_URL`: BLU torrent ID/link.
+- `-aither`, `--aither ID_OR_URL`: Aither torrent ID/link.
+- `-lst`, `--lst ID_OR_URL`: LST torrent ID/link.
+- `-oe`, `--oe ID_OR_URL`: OE torrent ID/link.
+- `-hdb`, `--hdb ID_OR_URL`: HDB torrent ID/link.
+- `-btn`, `--btn ID_OR_URL`: BTN torrent ID/link.
+- `-bhd`, `--bhd ID_OR_URL`: BHD torrent ID/link.
+- `-huno`, `--huno ID_OR_URL`: HUNO torrent ID/link.
+- `-ulcx`, `--ulcx ID_OR_URL`: ULCX torrent ID/link.
+- `-th`, `--torrenthash HASH`: reuse metadata from a torrent hash/comment where supported.
 
-## Tracker-specific references (existing torrent ids/links)
+## Upload Selection, Dupe Handling, And Requests
 
-These accept either an id or a full URL; when a URL is provided, the parser attempts to extract the id.
-These will parse the torrent descriptions from supported sites, and grab metadata ids to assist with accuracy.
+- `-tk`, `--trackers LIST`: upload/search only these trackers. Comma-separated tracker acronyms are supported.
+- `-rtk`, `--trackers-remove LIST`: remove these trackers from the configured default tracker list.
+- `-tpc`, `--trackers-pass N`: number of trackers that must pass checks for upload processing to complete.
+- `-req`, `--search_requests`: search for matching requests on supported trackers.
+- `-sat`, `--skip_auto_torrent`: skip automated torrent client torrent searching.
+- `-onlyID`, `--onlyID`: only grab metadata IDs from trackers, not description/image links.
+- `-sdc`, `--skip-dupe-check`: ignore dupes and upload anyway.
+- `-sda`, `--skip-dupe-asking`: do not prompt about dupes; treat found dupes as actual dupes.
+- `-ddc`, `--double-dupe-check`: run another dupe check before uploading to trackers that passed earlier checks.
+- `-dr`, `--draft`: send to drafts where supported.
+- `-mq`, `--modq`: send to moderation queue where supported.
+- `-fl`, `--freeleech N`: set freeleech percentage.
+- `-excl`, `--exclusive VALUE`: set exclusive flag on supported trackers.
 
-- `-ptp`, `--ptp ID_OR_URL`: PTP torrent id/permalink. (Extracts `torrentid` from query string.)
-- `-blu`, `--blu ID_OR_URL`: BLU torrent id/link. (Extracts last path segment.)
-- `-aither`, `--aither ID_OR_URL`: Aither torrent id/link. (Extracts last path segment.)
-- `-lst`, `--lst ID_OR_URL`: LST torrent id/link. (Extracts last path segment.)
-- `-oe`, `--oe ID_OR_URL`: OE torrent id/link. (Extracts last path segment.)
-- `-tik`, `--tik ID_OR_URL`: TIK torrent id/link. (No URL parsing here; passes through.)
-- `-hdb`, `--hdb ID_OR_URL`: HDB torrent id/link. (Extracts `id` from query string.)
-- `-btn`, `--btn ID_OR_URL`: BTN torrent id/link. (Extracts `id` from query string.)
-- `-bhd`, `--bhd ID_OR_URL`: BHD torrent id/link.
-  - Tries to extract trailing numeric id from URLs like `/download/... .12345`.
-- `-huno`, `--huno ID_OR_URL`: HUNO torrent id/link. (Extracts last path segment.)
-- `-ulcx`, `--ulcx ID_OR_URL`: ULCX torrent id/link. (Extracts last path segment.)
+## Torrent Creation And Hashing
 
-Thise will use the specified hash to get tracker ids from qBitTorrent or rTorrent.
-- `-th`, `--torrenthash HASH`: Torrent hash containing the torrent id in the comment field of the torrent.
+- `-mps`, `--max-piece-size {1,2,4,8,16,32,64,128}`: set max piece size in MiB.
+- `-nh`, `--nohash`: do not hash the torrent.
+- `-rh`, `--rehash`: force hashing.
+- `-mkbrr`, `--mkbrr`: use `mkbrr` for torrent hashing.
+- `-rt`, `--randomized N`: create additional torrents with random infohashes.
+- `-entropy`, `--entropy N`: use entropy in created torrents.
+- `--infohash HASH`: set V1 info hash.
+- `-frc`, `--force-recheck`: qBittorrent only; force recheck after adding/finding torrent.
 
-## Upload selection / dupe / requests
+## Torrent Client Integration
 
-- `-tk`, `--trackers LIST`: Upload only to these trackers (instead of a default torrent list from config).
-  - Accepts comma-separated tracker acronyms (e.g. `--trackers blu,bhd`) and normalizes to uppercase.
-- `-rtk`, `--trackers-remove LIST`: Remove only these trackers when processing default trackers.
-- `-tpc`, `--trackers-pass N`: How many trackers must pass checks (dupe/banned-group/etc) for the uploading process to complete.
-- `-req`, `--search_requests`: Search for matching requests on supported trackers.
-- `-sat`, `--skip_auto_torrent`: Skip automated qBittorrent client torrent searching.
-- `-onlyID`, `--onlyID`: Only grab meta ids from tracker (tmdb/imdb/etc), not description text. NOTE: description images are controlled with `keep_images` set in config.py.
-- `-sdc`, `--skip-dupe-check`: Ignore dupes and upload anyway (skips dupe check). NOTE: know what you are doing!
-- `-sda`, `--skip-dupe-asking`: Don’t prompt about any dupes that Upload Assistant finds; just treat these dupes as actual dupes.
-- `-ddc`, `--double-dupe-check`: Run a second dupe-check pass on trackers that previously passed checks, immediately before uploading. NOTE: mainly useful when racing as a preventive dupe upload catch.
-- `-dr`, `--draft`: Send to drafts (BHD, LST).
-- `-mq`, `--modq`: Send to modQ. NOTE: only for suppported UNIT3D type sites.
-- `-fl`, `--freeleech N`: Freeleech percentage (1–100). Default `0`. NOTE: accepts any numeric value, although UNIT3D defaults to only allowing filtering of specific percentages.
+- `-client`, `--client NAME`: use this torrent client instead of the default.
+- `-client_cat`, `--client-category`, `--client_category CATEGORY`: add to the selected torrent client with this category/label.
+- `-qbt`, `--qbit-tag TAG`: add to qBittorrent with this tag.
+- `-qbc`, `--qbit-cat CATEGORY`: add to qBittorrent with this category.
+- `-rtl`, `--rtorrent-label LABEL`: add to rTorrent with this label.
 
-## Anonymity / seeding / streaming flags
+## Release Flags
 
-- `-a`, `--anon`: Upload anonymously.
-- `-ns`, `--no-seed`: Do not add the torrent to the client.
-- `-st`, `--stream`: Stream optimized upload.
-- `-webdv`, `--webdv`: Indicates a Dolby Vision layer converted using `dovi_tool` (HYBRID).
-- `-hc`, `--hardcoded-subs`: Contains hardcoded subs.
-  - Note: stored in `meta` under key `hardcoded-subs` (with a hyphen).
-- `-pr`, `--personalrelease`: Personal release.
+- `-a`, `--anon`: upload anonymously.
+- `-ns`, `--no-seed`: do not add torrent to the client.
+- `-st`, `--stream`: mark as stream optimized.
+- `-webdv`, `--webdv`: mark as Dolby Vision layer converted with `dovi_tool`.
+- `-pr`, `--personalrelease`: mark as personal release.
+- `-e`, `--extras`: indicate extras are included.
+- `-sort`, `--sorted-filelist`: use the largest video file for processing instead of the first.
+- `-kf`, `--keep-folder`: keep the containing folder for a single-file input directory.
+- `-knfo`, `--keep-nfo`: keep NFO files where supported.
+- `-reg`, `--region REGION`: set disc region.
 
-## Torrent creation / hashing options
+## Tracker-Specific Category Flags
 
-- `-mps`, `--max-piece-size {1,2,4,8,16,32,64,128}`: Max piece size in MiB.
-- `-nh`, `--nohash`: Don’t hash `.torrent`.
-- `-rh`, `--rehash`: Rehash `.torrent` even if it was not needed.
-- `-mkbrr`, `--mkbrr`: Use mkbrr for torrent hashing.
-- `-entropy`, `--entropy N`: Use entropy in created torrents (32 or 64 bits).
-- `-rt`, `--randomized N`: Create N extra torrents with random infohash (default `0`).
-- `--infohash HASH`: V1 info hash to use as the base.
-- `-frc`, `--force-recheck`: (qBittorrent only with auto torrent searching) Force recheck torrent before uploading. NOTE: will find the best seeded torrent file from a supported site, for the related content, and force a recheck before uploading.
+- `--foreign`: set TIK foreign category.
+- `--opera`: set TIK opera/musical category.
+- `--asian`: set TIK Asian category.
+- `-disctype`, `--disctype TYPE`: set TIK disc type.
+- `--untouched`: mark as a completely untouched disc for TIK.
+- `-manual_dvds`, `--manual_dvds VALUE`: override automatic DVD count/type text.
+- `-ch`, `--channel ID_OR_TAG`: SPD only; set upload channel ID or tag without `@`.
 
-## Torrent client integration
+## Cleanup
 
-- `-client`, `--client NAME`: Use this torrent client instead of default.
-- `-qbt`, `--qbit-tag TAG`: Add to qBittorrent with this tag.
-- `-qbc`, `--qbit-cat CATEGORY`: Add to qBittorrent with this category.
-- `-rtl`, `--rtorrent-label LABEL`: Add to rTorrent with this label.
+- `-dm`, `--delete-meta`: delete only `meta.json` from the tmp directory.
+- `-dtmp`, `--delete-tmp`: delete the tmp directory for the working file/folder.
+- `-cleanup`, `--cleanup`: clean up tmp directory.
 
-## Cleanup / temp directory
+## Debugging And UI
 
-- `-dm`, `--delete-meta`: Delete only `meta.json` from tmp directory.
-- `-dtmp`, `--delete-tmp`: Delete tmp directory for the working file/folder.
-- `-cleanup`, `--cleanup`: Clean up the entire tmp directory.
+- `-debug`, `--debug`: debug mode; run without uploading.
+- `-ffdebug`, `--ffdebug`: show ffmpeg output while taking screenshots.
+- `-uptimer`, `--upload-timer`: print upload timing per tracker.
+- `-vs`, `--vapoursynth`: use VapourSynth for screenshots.
+- `-webui`, `--webui [HOST:PORT]`: start the web UI server only. Default is `127.0.0.1:5000`.
 
-## Debugging / output
+## Emby
 
-- `-debug`, `--debug`: Debug mode; runs through motions without uploading.
-- `-ffdebug`, `--ffdebug`: Show debugging info from ffmpeg while taking screenshots.
-- `-uptimer`, `--upload-timer`: Print time to upload to each site.
+- `-emby`, `--emby`: create an Emby-compliant NFO file and optionally symlink content.
+- `-emby_cat`, `--emby_cat CATEGORY`: set expected Emby category, such as `movie` or `tv`.
+- `-emby_debug`, `--emby_debug`: enable Emby-specific debug behavior.
 
-## VapourSynth screenshots
+## Hidden / Unattended
 
-- `-vs`, `--vapoursynth`: Use VapourSynth for screenshots (requires VS install). NOTE: probably broken.
+These exist in argparse but are suppressed from normal help output.
 
-## Emby support
-
-- `-emby`, `--emby`: Create an Emby-compliant NFO file and optionally symlink the content.
-- `-emby_cat`, `--emby_cat {movie|tv}`: Set the expected category for Emby.
-- `-emby_debug`, `--emby_debug`: Specifc debugging mode. NOT recommended.
-
-## SPD-only
-
-- `-ch`, `--channel ID_OR_TAG`: SPD: Channel id number or tag (without `@`).
-
-## Unattended (hidden)
-
-These are suppressed from help output:
-
-- `-ua`, `--unattended`: Doesn't prompt for anything. Will default to skipping a tracker related upload, instead of prompting a question. Use only if you know what you are doing, and are familar with any Upload Assistant quirks.
-- `-uac`, `--unattended_confirm`: Requires `-ua`. Unattended mode with some prompting.
+- `-ua`, `--unattended`: run unattended.
+- `-uac`, `--unattended_confirm`: unattended mode with selected confirmations.
