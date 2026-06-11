@@ -163,11 +163,14 @@ class SearchMatcher:
         if not release.release_name or not other.release_name:
             return False, "missing_release_name"
 
+        if size_only_match:
+            if release.size > 0 and other.size > 0 and release.size == other.size:
+                return True, "local_exact_size"
+            return False, "size_mismatch"
+
         size_matches = self._size_values_match(release.size, other.size, size_threshold=size_threshold)
         if not size_matches:
             return False, "size_mismatch"
-        if size_only_match:
-            return True, "local_exact_size"
 
         release_key = self.normalize_release_name(release.release_name)
         other_key = self.normalize_release_name(other.release_name)
