@@ -411,6 +411,7 @@ class SearchRunner:
                     release,
                     home_releases,
                     size_threshold=local_size_threshold,
+                    size_only_match=content_profile == "movie",
                 )
                 if local_exists:
                     continue
@@ -962,6 +963,7 @@ class SearchRunner:
                     release,
                     home_releases,
                     size_threshold=local_size_threshold,
+                    size_only_match=content_profile == "movie",
                 )
                 if local_exists:
                     plan.append({

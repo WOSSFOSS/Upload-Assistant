@@ -140,9 +140,15 @@ class SearchMatcher:
         release: ReleaseInfo,
         home_releases: list[ReleaseInfo],
         size_threshold: Optional[float] = None,
+        size_only_match: bool = False,
     ) -> tuple[bool, str, Optional[ReleaseInfo]]:
         for home_release in home_releases:
-            matches, reason = self.release_matches_release(release, home_release, size_threshold=size_threshold)
+            matches, reason = self.release_matches_release(
+                release,
+                home_release,
+                size_threshold=size_threshold,
+                size_only_match=size_only_match,
+            )
             if matches:
                 return True, reason, home_release
         return False, "no_local_match", None
@@ -152,6 +158,7 @@ class SearchMatcher:
         release: ReleaseInfo,
         other: ReleaseInfo,
         size_threshold: Optional[float] = None,
+        size_only_match: bool = False,
     ) -> tuple[bool, str]:
         if not release.release_name or not other.release_name:
             return False, "missing_release_name"
@@ -159,6 +166,8 @@ class SearchMatcher:
         size_matches = self._size_values_match(release.size, other.size, size_threshold=size_threshold)
         if not size_matches:
             return False, "size_mismatch"
+        if size_only_match:
+            return True, "local_exact_size"
 
         release_key = self.normalize_release_name(release.release_name)
         other_key = self.normalize_release_name(other.release_name)
