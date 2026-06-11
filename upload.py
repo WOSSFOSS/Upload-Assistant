@@ -1575,6 +1575,7 @@ async def do_the_thing(base_dir: str) -> None:
                 target_filter=search_trackers,
                 refresh_scan=bool(meta.get('refresh_scan')),
                 prepare_cache=bool(meta.get('prepare_search_cache')),
+                rescan=bool(meta.get('rescan')),
             )
             return
 

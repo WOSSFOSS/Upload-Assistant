@@ -54,6 +54,7 @@ class SearchRunner:
         target_filter: Optional[list[str]] = None,
         refresh_scan: bool = False,
         prepare_cache: bool = False,
+        rescan: bool = False,
     ) -> None:
         search_config = self.config.get("SEARCH")
         if not isinstance(search_config, dict):
@@ -88,6 +89,7 @@ class SearchRunner:
             stage="started",
             refresh_scan=refresh_scan,
             prepare_cache=prepare_cache,
+            rescan=rescan,
         )
 
         libraries = search_config.get("libraries")
@@ -127,8 +129,11 @@ class SearchRunner:
                 queue_name = str(target.get("queue_name") or f"search_{tracker_name.lower()}_{name}").strip()
                 cache_prefix = self._cache_prefix(queue_name)
                 cache_file = cache_dir / f"{cache_prefix}_search_plan.json"
-                scan_checkpoint_file = cache_dir / f"{cache_prefix}_scan_checkpoint.json"
+                source_scan_checkpoint_file = cache_dir / f"{cache_prefix}_source_scan_checkpoint.json"
+                home_cache_prefix = self._cache_prefix(f"{tracker_name.lower()}_{name}_home")
+                home_scan_checkpoint_file = cache_dir / f"{home_cache_prefix}_scan_checkpoint.json"
                 api_cache_file = cache_dir / f"{cache_prefix}_api_cache.json"
+                home_paths = self._resolve_home_paths(target, libraries_map)
                 await self._write_run_state(
                     cache_dir / "search_run_state.json",
                     profile_name,
@@ -138,30 +143,46 @@ class SearchRunner:
                     profile=name,
                     refresh_scan=refresh_scan,
                     prepare_cache=prepare_cache,
+                    rescan=rescan,
                 )
                 home_releases: list[ReleaseInfo] = []
                 home_candidates: list[str] = []
                 candidates: list[str] = []
-                scan_checkpoint = None
+                source_checkpoint: Optional[list[str]] = None
+                home_checkpoint: Optional[list[str]] = None
+                if rescan:
+                    await self._delete_scan_checkpoints(
+                        [source_scan_checkpoint_file, home_scan_checkpoint_file],
+                        tracker_name,
+                    )
                 if refresh_scan:
                     console.print(f"[cyan]{tracker_name}:[/cyan] refresh scan requested, ignoring cached scan checkpoint")
-                else:
-                    scan_checkpoint = await self._load_scan_checkpoint(
-                        scan_checkpoint_file,
+                elif not rescan:
+                    source_checkpoint = await self._load_scan_candidates(
+                        source_scan_checkpoint_file,
                         tracker_name,
                         name,
                         content_profile,
                         search_config,
                         target,
                         source_paths,
-                        self._resolve_home_paths(target, libraries_map),
+                        stage="source_scanned",
                     )
-                if scan_checkpoint:
-                    candidates = list(scan_checkpoint.get("source_candidates", []))
-                    home_candidates = list(scan_checkpoint.get("home_candidates", []))
+                    home_checkpoint = await self._load_scan_candidates(
+                        home_scan_checkpoint_file,
+                        tracker_name,
+                        name,
+                        content_profile,
+                        search_config,
+                        target,
+                        home_paths,
+                        stage="home_scanned",
+                    )
+                if source_checkpoint is not None:
+                    candidates = list(source_checkpoint)
                     console.print(
-                        f"[cyan]{tracker_name}:[/cyan] using cached scan checkpoint "
-                        f"({len(candidates)} source, {len(home_candidates)} home candidate(s))"
+                        f"[cyan]{tracker_name}:[/cyan] using cached source scan checkpoint "
+                        f"({len(candidates)} source candidate(s))"
                     )
                 else:
                     console.print(f"[cyan]{tracker_name}:[/cyan] scanning source libraries for {content_profile} candidates...")
@@ -173,20 +194,23 @@ class SearchRunner:
                         scan_memory_cache=scan_memory_cache,
                     )
                     console.print(f"[cyan]{tracker_name}:[/cyan] found {len(candidates)} source candidate(s)")
-                    await self._write_scan_checkpoint(
-                        scan_checkpoint_file,
+                    await self._write_scan_candidates(
+                        source_scan_checkpoint_file,
                         tracker_name,
                         name,
                         content_profile,
                         candidates,
-                        [],
                         stage="source_scanned",
-                        source_paths=source_paths,
-                        home_paths=self._resolve_home_paths(target, libraries_map),
+                        paths=source_paths,
                     )
                 if self._local_prefilter_enabled(search_config, target):
-                    if not scan_checkpoint:
-                        home_paths = self._resolve_home_paths(target, libraries_map)
+                    if home_checkpoint is not None:
+                        home_candidates = list(home_checkpoint)
+                        console.print(
+                            f"[cyan]{tracker_name}:[/cyan] using cached home scan checkpoint "
+                            f"({len(home_candidates)} home candidate(s))"
+                        )
+                    else:
                         if home_paths:
                             console.print(f"[cyan]{tracker_name}:[/cyan] scanning target home libraries for local prefilter...")
                             home_candidates = self._scan_paths_cached(
@@ -196,20 +220,17 @@ class SearchRunner:
                                 progress_interval=progress_interval,
                                 scan_memory_cache=scan_memory_cache,
                             )
+                            await self._write_scan_candidates(
+                                home_scan_checkpoint_file,
+                                tracker_name,
+                                name,
+                                content_profile,
+                                home_candidates,
+                                stage="home_scanned",
+                                paths=home_paths,
+                            )
                     home_releases = [self.matcher.parse_release(candidate) for candidate in home_candidates]
                     console.print(f"[cyan]{tracker_name}:[/cyan] local prefilter loaded {len(home_releases)} home candidate(s)")
-                    if not scan_checkpoint:
-                        await self._write_scan_checkpoint(
-                            scan_checkpoint_file,
-                            tracker_name,
-                            name,
-                            content_profile,
-                            candidates,
-                            home_candidates,
-                            stage="home_scanned",
-                            source_paths=source_paths,
-                            home_paths=home_paths,
-                        )
 
                 api_cache = await self._load_api_cache(api_cache_file)
                 profile_contexts.append({
@@ -248,6 +269,7 @@ class SearchRunner:
             total_written=total_written,
             refresh_scan=refresh_scan,
             prepare_cache=prepare_cache,
+            rescan=rescan,
         )
         console.print(f"[bold green]Search queue generation complete.[/bold green] {total_written} total candidate(s).")
 
@@ -1390,7 +1412,7 @@ class SearchRunner:
             ttl_hours = 24.0
         return max(0.0, ttl_hours)
 
-    async def _load_scan_checkpoint(
+    async def _load_scan_candidates(
         self,
         path: Path,
         tracker_name: str,
@@ -1398,9 +1420,9 @@ class SearchRunner:
         content_profile: str,
         search_config: dict[str, Any],
         target: dict[str, Any],
-        source_paths: list[Path],
-        home_paths: list[Path],
-    ) -> Optional[dict[str, Any]]:
+        paths: list[Path],
+        stage: str,
+    ) -> Optional[list[str]]:
         if not self._scan_cache_enabled(search_config, target) or not path.exists():
             return None
         try:
@@ -1410,7 +1432,7 @@ class SearchRunner:
             return None
         if not isinstance(data, dict):
             return None
-        if int(data.get("version") or 0) < 3:
+        if int(data.get("version") or 0) < 4:
             return None
         if str(data.get("tracker") or "").upper() != tracker_name:
             return None
@@ -1418,15 +1440,12 @@ class SearchRunner:
             return None
         if str(data.get("content") or "") != content_profile:
             return None
-        if data.get("source_paths") != self._path_signature(source_paths):
+        if data.get("paths") != self._path_signature(paths):
             return None
-        if data.get("home_paths") != self._path_signature(home_paths):
+        if data.get("stage") != stage:
             return None
-        if data.get("stage") != "home_scanned":
-            return None
-        source_candidates = data.get("source_candidates")
-        home_candidates = data.get("home_candidates")
-        if not isinstance(source_candidates, list) or not isinstance(home_candidates, list):
+        candidates = data.get("candidates")
+        if not isinstance(candidates, list):
             return None
         ttl_hours = self._scan_cache_ttl_hours(search_config, target)
         updated_at = data.get("updated_at")
@@ -1436,37 +1455,44 @@ class SearchRunner:
             return None
         if ttl_hours > 0 and (time.time() - updated_at_float) > ttl_hours * 3600:
             return None
-        data["source_candidates"] = [str(item) for item in source_candidates if str(item).strip()]
-        data["home_candidates"] = [str(item) for item in home_candidates if str(item).strip()]
-        return data
+        return [str(item) for item in candidates if str(item).strip()]
 
-    async def _write_scan_checkpoint(
+    async def _write_scan_candidates(
         self,
         path: Path,
         tracker_name: str,
         profile_name: str,
         content_profile: str,
-        source_candidates: list[str],
-        home_candidates: list[str],
+        candidates: list[str],
         stage: str,
-        source_paths: list[Path],
-        home_paths: list[Path],
+        paths: list[Path],
     ) -> None:
         await self._write_json(path, {
-            "version": 3,
+            "version": 4,
             "stage": stage,
             "tracker": tracker_name,
             "profile": profile_name,
             "content": content_profile,
-            "source_count": len(source_candidates),
-            "home_count": len(home_candidates),
-            "source_paths": self._path_signature(source_paths),
-            "home_paths": self._path_signature(home_paths),
-            "source_candidates": source_candidates,
-            "home_candidates": home_candidates,
+            "count": len(candidates),
+            "paths": self._path_signature(paths),
+            "candidates": candidates,
             "updated_at": time.time(),
         })
         console.print(f"[cyan]{tracker_name}:[/cyan] wrote scan checkpoint to [cyan]{path}[/cyan]")
+
+    async def _delete_scan_checkpoints(self, paths: list[Path], tracker_name: str) -> None:
+        import asyncio
+
+        deleted = 0
+        for path in paths:
+            try:
+                if path.exists():
+                    await asyncio.to_thread(path.unlink)
+                    deleted += 1
+            except OSError as e:
+                console.print(f"[yellow]{tracker_name}: could not delete scan checkpoint {path}: {e}[/yellow]")
+        if deleted:
+            console.print(f"[cyan]{tracker_name}:[/cyan] deleted {deleted} scan checkpoint(s) for rescan")
 
     def _cache_prefix(self, queue_name: str) -> str:
         normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", queue_name.strip())

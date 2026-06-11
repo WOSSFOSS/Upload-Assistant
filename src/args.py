@@ -33,6 +33,7 @@ Common options:
   --queue (queue name)       Process an entire folder (including files/subfolders) in a queue
   --search                   Run configured search profiles and create queue files
   --refresh-scan             Ignore cached filesystem scan checkpoints for this search run
+  --rescan                   Delete search scan checkpoints for this run before scanning
   --prepare-search-cache     Prepare search scan caches without tracker API searches
   -mf, --manual_frames       Comma-separated list of frame numbers to use for screenshots
   -df, --descfile            Path to custom description file
@@ -89,6 +90,7 @@ class Args:
         parser.add_argument('--search', action='store_true', required=False, help="Run configured SEARCH profiles and create UA queue files")
         parser.add_argument('--search-profile', dest='search_profile', nargs=1, required=False, help="Run one configured SEARCH profile")
         parser.add_argument('--refresh-scan', dest='refresh_scan', action='store_true', required=False, help="Search mode: ignore cached filesystem scan checkpoints and scan source/home libraries again")
+        parser.add_argument('--rescan', dest='rescan', action='store_true', required=False, help="Search mode: delete source/home scan checkpoints for this run before scanning")
         parser.add_argument('--prepare-search-cache', dest='prepare_search_cache', action='store_true', required=False, help="Search mode: update scan/cache files without tracker API searches or queue generation")
         parser.add_argument('-lq', '--limit-queue', dest='limit_queue', nargs=1, required=False, help="Limit the amount of queue files processed", type=int, default=0)
         parser.add_argument('-sc', '--site-check', dest='site_check', action='store_true', required=False, help="Just search sites for suitable uploads and create log file, no uploading", default=False)
