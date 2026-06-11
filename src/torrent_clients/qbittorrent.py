@@ -1350,12 +1350,13 @@ class QbittorrentClientMixin:
                 'ulcx': {"url": "https://upload.cx", "pattern": r'/(\d+)$'},
                 'rf': {"url": "https://reelflix.xyz", "pattern": r'/(\d+)$'},
                 'otw': {"url": "https://oldtoons.world", "pattern": r'/(\d+)$'},
+                'mns': {"url": "https://midnightscene.cc", "pattern": r'/(\d+)$'},
                 'yus': {"url": "https://yu-scene.net", "pattern": r'/(\d+)$'},
                 'dp': {"url": "https://darkpeers.org", "pattern": r'/(\d+)$'},
                 'sp': {"url": "https://seedpool.org", "pattern": r'/(\d+)$'},
             }
 
-            tracker_priority = ['aither', 'ulcx', 'lst', 'blu', 'oe', 'btn', 'bhd', 'huno', 'hdb', 'rf', 'otw', 'yus', 'dp', 'sp', 'ptp']
+            tracker_priority = ['aither', 'ulcx', 'lst', 'blu', 'oe', 'btn', 'bhd', 'huno', 'hdb', 'rf', 'otw', 'mns', 'yus', 'dp', 'sp', 'ptp']
 
             if proxy_url:
                 try:
@@ -1934,6 +1935,7 @@ async def match_tracker_url(tracker_urls: list[str], meta: dict[str, Any]) -> No
         'lst': ["https://lst.gg"],
         'lt': ["https://lat-team.com"],
         'lume': ["https://luminarr.me"],
+        'mns': ["https://midnightscene.cc"],
         'mtv': ["tracker.morethantv"],
         'nbl': ["tracker.nebulance"],
         'oe': ["https://onlyencodes.cc"],
