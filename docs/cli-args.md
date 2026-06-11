@@ -163,6 +163,8 @@ These options accept an ID or URL where supported and are used to pull metadata 
 
 - `-client`, `--client NAME`: use this torrent client instead of the default.
 - `-client_cat`, `--client-category`, `--client_category CATEGORY`: add to the selected torrent client with this category/label.
+- `-client_tag`, `--client-tag`, `--client_tag TAG`: add to the selected torrent client with this tag.
+- `-client_link`, `--client-link-path`, `--client_link_path PATH`: override the linked-folder/link target path for this upload.
 - `-qbt`, `--qbit-tag TAG`: add to qBittorrent with this tag.
 - `-qbc`, `--qbit-cat CATEGORY`: add to qBittorrent with this category.
 - `-rtl`, `--rtorrent-label LABEL`: add to rTorrent with this label.

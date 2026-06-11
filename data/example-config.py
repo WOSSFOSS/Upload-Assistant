@@ -363,6 +363,8 @@ config = {
         # Only add the trackers you want to upload to on a regular basis
         # Optional per-tracker torrent client overrides can be set in any tracker block:
         # "client_category": "tracker_uploads" sets the qBitTorrent category, or rTorrent/Transmission label.
+        # "client_tag": "tracker_tag" sets a qBitTorrent tag for this tracker.
+        # "client_link_path": "/path/to/linked/content" overrides TORRENT_CLIENTS linked_folder for this tracker.
         # Client-specific keys like "qbit_cat", "rtorrent_label", or "transmission_label" override the generic value.
         "default_trackers": "",
 
@@ -403,6 +405,10 @@ config = {
             "modq": False,
             # Optional torrent client category/label override for this tracker.
             "client_category": "",
+            # Optional qBitTorrent tag override for this tracker.
+            "client_tag": "",
+            # Optional linked_folder override for this tracker.
+            "client_link_path": "",
         },
         "ANT": {
             # Instead of using the tracker acronym for folder name when sym/hard linking, you can use a custom name

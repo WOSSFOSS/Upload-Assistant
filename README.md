@@ -199,6 +199,40 @@ Many thanks to all who have contributed.
   Web UI setup (Docker GUI / Unraid): [docs/docker-gui-wiki-full.md](docs/docker-gui-wiki-full.md)
   Web UI docs: [docs/web-ui.md](docs/web-ui.md)
 
+## **New Fork CLI Quick Reference:**
+
+  A compact overview of newer commands added in this fork. See the full list in [docs/cli-args.md](docs/cli-args.md).
+
+  **Search and queue tooling**
+  - `--search --search-profile movies` run configured upload-search profiles.
+  - `--prepare-search-cache --search-profile movies` refresh local search/cache data without tracker API searches.
+  - `--refresh-scan` ignore existing scan checkpoints for this run.
+  - `--rescan` delete current source/home scan checkpoints before scanning.
+  - `--queue NAME -lq N` process a named queue with an optional item limit.
+
+  **Music and books**
+  - `-c music` process a music release.
+  - `-c book` process an ebook or audiobook release.
+  - `-art`, `-alb`, `-mbid`, `-discogs`, `-deezer` override music metadata lookups.
+  - `-btitle`, `-author`, `-isbn`, `-narrator`, `--series`, `--book-number` override book/audiobook metadata.
+  - `--retail`, `--scan`, `--ocr`, `--comic`, `--magazine`, `--abridged`, `--unabridged` set book/audiobook release flags.
+
+  **Upload flow and tracker handling**
+  - `-ua` run unattended.
+  - `-uac` run unattended with selected confirmations.
+  - `-mq` send supported trackers to mod queue.
+  - `-dr` send supported trackers to draft.
+  - `-sdc` skip dupe checking.
+  - `-sda` skip dupe asking and treat found dupes as dupes.
+  - `-ddc` run an additional dupe check before upload.
+
+  **Torrent client overrides**
+  - `-client NAME` choose the torrent client for this run.
+  - `-client_cat CATEGORY` set client category/label for this run.
+  - `-client_tag TAG` set client tag for this run.
+  - `-client_link PATH` override the client link target path for this run.
+  - `-qbt TAG`, `-qbc CATEGORY`, `-rtl LABEL` remain available for client-specific overrides.
+
 ## **Attributions:**
 
 Built with updated BDInfoCLI from https://github.com/rokibhasansagar/BDInfoCLI-ng

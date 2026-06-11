@@ -204,6 +204,8 @@ class Args:
         parser.add_argument('-mq', '--modq', action='store_true', required=False, help="Send to modQ")
         parser.add_argument('-client', '--client', nargs=1, required=False, help="Use this torrent client instead of default")
         parser.add_argument('-client_cat', '--client-category', '--client_category', dest='client_category', nargs=1, required=False, help="Add to the selected torrent client with this category/label")
+        parser.add_argument('-client_tag', '--client-tag', '--client_tag', dest='client_tag', nargs=1, required=False, help="Add to the selected torrent client with this tag")
+        parser.add_argument('-client_link', '--client-link-path', '--client_link_path', dest='client_link_path', nargs=1, required=False, help="Override the linked_folder/link target path for this upload")
         parser.add_argument('-qbt', '--qbit-tag', dest='qbit_tag', nargs=1, required=False, help="Add to qbit with this tag")
         parser.add_argument('-qbc', '--qbit-cat', dest='qbit_cat', nargs=1, required=False, help="Add to qbit with this category")
         parser.add_argument('-rtl', '--rtorrent-label', dest='rtorrent_label', nargs=1, required=False, help="Add to rtorrent with this label")

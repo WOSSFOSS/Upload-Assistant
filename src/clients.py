@@ -162,7 +162,7 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
                 console.print(f"[bold red]Torrent client '{client_name}' not found in config.")
                 continue
 
-            client = self.config['TORRENT_CLIENTS'][client_name]
+            client = self._apply_tracker_client_config_overrides(self.config['TORRENT_CLIENTS'][client_name], meta, tracker)
             torrent_client = client['torrent_client']
             await self.inject_delay(meta, tracker, client_name)
 
@@ -205,7 +205,14 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
         if qbit_category and torrent_client == "qbit":
             overrides['qbit_cat'] = qbit_category
 
-        qbit_tag = meta.get('qbit_tag') or tracker_cfg.get('qbit_tag')
+        generic_tag = (
+            meta.get('client_tag')
+            or meta.get('torrent_client_tag')
+            or tracker_cfg.get('client_tag')
+            or tracker_cfg.get('torrent_client_tag')
+        )
+
+        qbit_tag = meta.get('qbit_tag') or tracker_cfg.get('qbit_tag') or generic_tag
         if qbit_tag and torrent_client == "qbit":
             overrides['qbit_tag'] = qbit_tag
 
@@ -228,6 +235,30 @@ class Clients(QbittorrentClientMixin, RtorrentClientMixin, DelugeClientMixin, Tr
             formatted = ", ".join(f"{key}={value}" for key, value in overrides.items())
             console.print(f"[cyan]{tracker}: Applying tracker-specific client override: {formatted}[/cyan]")
         return client_meta
+
+    def _apply_tracker_client_config_overrides(self, client: dict[str, Any], meta: dict[str, Any], tracker: str) -> dict[str, Any]:
+        tracker_cfg = self.config.get('TRACKERS', {}).get(tracker, {})
+        if not isinstance(tracker_cfg, dict):
+            tracker_cfg = {}
+
+        link_path = (
+            meta.get('client_link_path')
+            or meta.get('torrent_client_link_path')
+            or tracker_cfg.get('client_link_path')
+            or tracker_cfg.get('torrent_client_link_path')
+            or tracker_cfg.get('linked_folder')
+            or tracker_cfg.get('link_path')
+            or tracker_cfg.get('link_destination')
+        )
+
+        if not link_path:
+            return client
+
+        client_copy = dict(client)
+        client_copy['linked_folder'] = link_path
+        if meta.get('debug'):
+            console.print(f"[cyan]{tracker}: Applying tracker-specific linked folder override: {link_path}[/cyan]")
+        return client_copy
 
     async def inject_delay(self, meta: dict[str, Any], tracker: str, client_name: str) -> None:
         """
