@@ -124,9 +124,11 @@ class SearchRunner:
                 content_profile = self._content_profile(name, target)
                 progress_interval = self._progress_interval(search_config, target)
                 checkpoint_interval = self._checkpoint_interval(search_config, target)
-                cache_file = cache_dir / f"{tracker_name.lower()}_{name}_search_plan.json"
-                scan_checkpoint_file = cache_dir / f"{tracker_name.lower()}_{name}_scan_checkpoint.json"
-                api_cache_file = cache_dir / f"{tracker_name.lower()}_{name}_api_cache.json"
+                queue_name = str(target.get("queue_name") or f"search_{tracker_name.lower()}_{name}").strip()
+                cache_prefix = self._cache_prefix(queue_name)
+                cache_file = cache_dir / f"{cache_prefix}_search_plan.json"
+                scan_checkpoint_file = cache_dir / f"{cache_prefix}_scan_checkpoint.json"
+                api_cache_file = cache_dir / f"{cache_prefix}_api_cache.json"
                 await self._write_run_state(
                     cache_dir / "search_run_state.json",
                     profile_name,
@@ -151,6 +153,8 @@ class SearchRunner:
                         content_profile,
                         search_config,
                         target,
+                        source_paths,
+                        self._resolve_home_paths(target, libraries_map),
                     )
                 if scan_checkpoint:
                     candidates = list(scan_checkpoint.get("source_candidates", []))
@@ -177,6 +181,8 @@ class SearchRunner:
                         candidates,
                         [],
                         stage="source_scanned",
+                        source_paths=source_paths,
+                        home_paths=self._resolve_home_paths(target, libraries_map),
                     )
                 if self._local_prefilter_enabled(search_config, target):
                     if not scan_checkpoint:
@@ -201,6 +207,8 @@ class SearchRunner:
                             candidates,
                             home_candidates,
                             stage="home_scanned",
+                            source_paths=source_paths,
+                            home_paths=home_paths,
                         )
 
                 api_cache = await self._load_api_cache(api_cache_file)
@@ -1341,6 +1349,8 @@ class SearchRunner:
         content_profile: str,
         search_config: dict[str, Any],
         target: dict[str, Any],
+        source_paths: list[Path],
+        home_paths: list[Path],
     ) -> Optional[dict[str, Any]]:
         if not self._scan_cache_enabled(search_config, target) or not path.exists():
             return None
@@ -1356,6 +1366,10 @@ class SearchRunner:
         if str(data.get("profile") or "") != profile_name:
             return None
         if str(data.get("content") or "") != content_profile:
+            return None
+        if data.get("source_paths") != self._path_signature(source_paths):
+            return None
+        if data.get("home_paths") != self._path_signature(home_paths):
             return None
         if data.get("stage") != "home_scanned":
             return None
@@ -1384,6 +1398,8 @@ class SearchRunner:
         source_candidates: list[str],
         home_candidates: list[str],
         stage: str,
+        source_paths: list[Path],
+        home_paths: list[Path],
     ) -> None:
         await self._write_json(path, {
             "version": 1,
@@ -1393,11 +1409,28 @@ class SearchRunner:
             "content": content_profile,
             "source_count": len(source_candidates),
             "home_count": len(home_candidates),
+            "source_paths": self._path_signature(source_paths),
+            "home_paths": self._path_signature(home_paths),
             "source_candidates": source_candidates,
             "home_candidates": home_candidates,
             "updated_at": time.time(),
         })
         console.print(f"[cyan]{tracker_name}:[/cyan] wrote scan checkpoint to [cyan]{path}[/cyan]")
+
+    def _cache_prefix(self, queue_name: str) -> str:
+        normalized = re.sub(r"[^A-Za-z0-9._-]+", "_", queue_name.strip())
+        normalized = normalized.strip("._-")
+        return normalized.lower() or "search"
+
+    def _path_signature(self, paths: list[Path]) -> list[str]:
+        normalized_paths: list[str] = []
+        for path in paths:
+            expanded = path.expanduser()
+            try:
+                normalized_paths.append(os.fspath(expanded.resolve()))
+            except OSError:
+                normalized_paths.append(os.fspath(expanded))
+        return sorted(dict.fromkeys(normalized_paths))
 
     async def _write_run_state(
         self,
