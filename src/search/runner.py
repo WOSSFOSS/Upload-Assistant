@@ -25,6 +25,7 @@ EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}e\d{1,3}|s\d{1,2}e\d{1,3}
 DAILY_EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:19|20)\d{2}[.\-_]\d{1,2}[.\-_]\d{1,2}(?:[.\s_\-]|$)")
 ANIME_EPISODE_NUMBER_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:e(?:p(?:isode)?)?[.\s_\-]?)?\d{1,3}(?:v\d+)?(?:[.\s_\-]|$)")
 SEASON_PACK_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}|season[.\s_\-]?\d{1,2}|complete)(?:[.\s_\-]|$)")
+SAMPLE_RE = re.compile(r"(?i)(?:^|[.\s_\-])sample(?:[.\s_\-]|$)")
 DISC_MARKERS = {
     "BDMV": {"BDMV/index.bdmv", "BDMV/BACKUP/index.bdmv"},
     "DVD": {"VIDEO_TS/VIDEO_TS.IFO"},
@@ -595,6 +596,8 @@ class SearchRunner:
 
     def _add_candidate(self, path: Path, candidates: list[str], seen: set[str], content_profile: str = "generic") -> None:
         suffix = path.suffix.lower()
+        if self._is_sample_file(path):
+            return
         if content_profile == "movie":
             if suffix not in VIDEO_EXTENSIONS or self._looks_like_tv_episode_path(path):
                 return
@@ -646,6 +649,7 @@ class SearchRunner:
                 item for item in directory.iterdir()
                 if item.is_file()
                 and item.suffix.lower() in VIDEO_EXTENSIONS
+                and not self._is_sample_file(item)
             ]
             for video_file in video_files:
                 if self._is_daily_episode_name(video_file.name):
@@ -705,6 +709,13 @@ class SearchRunner:
 
     def _is_season_pack_name(self, name: str) -> bool:
         return bool(SEASON_PACK_RE.search(name)) and not self._is_episode_name(name)
+
+    def _is_sample_file(self, path: Path) -> bool:
+        if path.suffix.lower() not in VIDEO_EXTENSIONS:
+            return False
+        if SAMPLE_RE.search(path.stem):
+            return True
+        return any(part.lower() == "sample" for part in path.parts)
 
     def _looks_like_tv_episode_path(self, path: Path) -> bool:
         if self._is_episode_name(path.name):
