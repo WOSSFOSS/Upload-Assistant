@@ -1,3 +1,4 @@
+import asyncio
 import os
 import re
 from pathlib import Path
@@ -218,7 +219,7 @@ class ZNTH(UNIT3D):
             return {}
 
         cover_path = Path(cover)
-        if cover_path.exists():
+        if await asyncio.to_thread(cover_path.exists):
             return await self._cover_file_payload(cover_path)
 
         if cover.startswith(('http://', 'https://')):
@@ -239,7 +240,7 @@ class ZNTH(UNIT3D):
         if suffix not in {'.jpg', '.jpeg', '.png', '.webp'}:
             suffix = '.jpg'
         tmp_dir = Path(meta['base_dir']) / 'tmp' / meta['uuid']
-        tmp_dir.mkdir(parents=True, exist_ok=True)
+        await asyncio.to_thread(tmp_dir.mkdir, parents=True, exist_ok=True)
         cover_path = tmp_dir / f'album_cover{suffix}'
 
         try:
