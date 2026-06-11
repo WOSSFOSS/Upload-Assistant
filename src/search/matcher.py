@@ -166,7 +166,6 @@ class SearchMatcher:
         if size_only_match:
             if release.size > 0 and other.size > 0 and release.size == other.size:
                 return True, "local_exact_size"
-            return False, "size_mismatch"
 
         size_matches = self._size_values_match(release.size, other.size, size_threshold=size_threshold)
         if not size_matches:

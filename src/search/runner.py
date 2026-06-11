@@ -778,9 +778,7 @@ class SearchRunner:
         relevant_parents = self._parents_within_scan_root(path, scan_root)
         if any(self._is_episode_name(parent.name) or self._is_season_pack_name(parent.name) for parent in relevant_parents):
             return True
-        if scan_root is not None and path.parent.resolve() == scan_root.resolve():
-            return False
-        return self._parent_looks_like_tv_pack(path)
+        return False
 
     def _parents_within_scan_root(self, path: Path, scan_root: Path | None) -> list[Path]:
         if scan_root is None:
@@ -825,6 +823,7 @@ class SearchRunner:
 
         looks_like_pack = (
             len(video_files) >= 2
+            and not self._looks_like_mixed_movie_bucket(video_files)
             and (
                 self._is_season_pack_name(parent.name)
                 or self._is_episode_name(parent.name)
@@ -834,6 +833,15 @@ class SearchRunner:
         )
         self._tv_parent_cache[cache_key] = looks_like_pack
         return looks_like_pack
+
+    def _looks_like_mixed_movie_bucket(self, paths: list[Path]) -> bool:
+        if len(paths) < 5:
+            return False
+        movie_like = 0
+        for path in paths:
+            if YEAR_RE.search(path.name) and RESOLUTION_RE.search(path.name):
+                movie_like += 1
+        return movie_like >= 3
 
     def _content_profile(self, profile_name: str, target: dict[str, Any]) -> str:
         configured = str(target.get("content") or target.get("category") or "").strip().lower()
@@ -1432,7 +1440,7 @@ class SearchRunner:
             return None
         if not isinstance(data, dict):
             return None
-        if int(data.get("version") or 0) < 4:
+        if int(data.get("version") or 0) < 6:
             return None
         if str(data.get("tracker") or "").upper() != tracker_name:
             return None
@@ -1468,7 +1476,7 @@ class SearchRunner:
         paths: list[Path],
     ) -> None:
         await self._write_json(path, {
-            "version": 4,
+            "version": 6,
             "stage": stage,
             "tracker": tracker_name,
             "profile": profile_name,
