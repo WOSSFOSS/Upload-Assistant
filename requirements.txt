@@ -19,6 +19,7 @@ flask-cors==6.0.2
 Flask-Limiter==3.11.0
 Flask-Session==0.8.0
 cachelib==0.13.0
+certifi==2026.05.20
 guessit==3.8.0
 httpx==0.28.1
 Jinja2==3.1.6
@@ -46,6 +47,8 @@ torf==4.3.0
 tqdm==4.67.1
 transmission_rpc==7.0.11
 tvdb-v4-official==1.1.0
+typing-extensions==4.15.0
 unidecode==1.4.0
 urllib3==2.6.3
 waitress==3.0.2
+Werkzeug==3.1.3

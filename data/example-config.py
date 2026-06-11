@@ -1031,8 +1031,11 @@ config = {
         # Set scan_cache_ttl_hours to 0 to keep scan checkpoints indefinitely.
         "scan_cache": True,
         "scan_cache_ttl_hours": 24,
-        # Print progress every N scanned filesystem items / checked candidates.
-        # Set to 0 to disable periodic progress messages.
+        # Show a single live-updating status table during search runs.
+        # Set to False if your terminal/log collector does not handle live console rendering well.
+        "live_progress": True,
+        # Update progress every N scanned filesystem items / checked candidates.
+        # Set to 0 to disable periodic progress updates.
         "progress_interval": 5000,
         # Write partial search plans/caches/queues every N checked candidates.
         # Set to 0 to only write final files after the target has completed.

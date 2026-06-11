@@ -7,9 +7,12 @@ import shutil
 import sqlite3
 import time
 import urllib.parse
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
 
+from rich.live import Live
+from rich.table import Table
 from torf import Torrent
 
 from src.console import console
@@ -32,6 +35,88 @@ DISC_MARKERS = {
 }
 
 
+@dataclass
+class SearchStatusRow:
+    label: str
+    phase: str = "pending"
+    current: int = 0
+    total: int = 0
+    candidates: int = 0
+    queued: int = 0
+    missing: int = 0
+    exists: int = 0
+    local: int = 0
+    cache: int = 0
+    skipped: int = 0
+    errors: int = 0
+    detail: str = ""
+
+
+class SearchProgress:
+    def __init__(self, enabled: bool = True) -> None:
+        self.enabled = enabled
+        self.rows: dict[str, SearchStatusRow] = {}
+        self.live: Live | None = None
+
+    def __enter__(self) -> "SearchProgress":
+        if self.enabled:
+            self.live = Live(self._render(), console=console, refresh_per_second=4, transient=False)
+            self.live.start()
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        if self.live:
+            self.live.update(self._render())
+            self.live.stop()
+
+    def update(self, label: str, **values: Any) -> None:
+        row = self.rows.setdefault(label, SearchStatusRow(label=label))
+        for key, value in values.items():
+            if hasattr(row, key):
+                setattr(row, key, value)
+        self.refresh()
+
+    def increment(self, label: str, field_name: str, amount: int = 1) -> None:
+        row = self.rows.setdefault(label, SearchStatusRow(label=label))
+        if hasattr(row, field_name):
+            setattr(row, field_name, int(getattr(row, field_name)) + amount)
+        self.refresh()
+
+    def refresh(self) -> None:
+        if self.live:
+            self.live.update(self._render())
+
+    def _render(self) -> Table:
+        table = Table(title="Search Status", expand=True)
+        table.add_column("Target", no_wrap=True)
+        table.add_column("Phase", no_wrap=True)
+        table.add_column("Current/Total", justify="right", no_wrap=True)
+        table.add_column("Candidates", justify="right", no_wrap=True)
+        table.add_column("Queue", justify="right", no_wrap=True)
+        table.add_column("Missing", justify="right", no_wrap=True)
+        table.add_column("Exists", justify="right", no_wrap=True)
+        table.add_column("Local", justify="right", no_wrap=True)
+        table.add_column("Cache", justify="right", no_wrap=True)
+        table.add_column("Skip/Error", justify="right", no_wrap=True)
+        table.add_column("Detail")
+        for row in self.rows.values():
+            total_text = f"{row.current}/{row.total}" if row.total else str(row.current)
+            table.add_row(
+                row.label,
+                row.phase,
+                total_text,
+                str(row.candidates),
+                str(row.queued),
+                str(row.missing),
+                str(row.exists),
+                str(row.local),
+                str(row.cache),
+                f"{row.skipped}/{row.errors}",
+                row.detail,
+            )
+        return table
+
+
 class SearchRunner:
     def __init__(self, config: dict[str, Any], base_dir: str, debug: bool = False) -> None:
         self.config = config
@@ -47,6 +132,7 @@ class SearchRunner:
         self.matcher = SearchMatcher(fuzzy_size_threshold=fuzzy_threshold)
         self.provider = SearchProvider(config, base_dir, self.matcher, debug=debug)
         self._tv_parent_cache: dict[str, bool] = {}
+        self._progress: SearchProgress | None = None
 
     async def run(
         self,
@@ -100,6 +186,8 @@ class SearchRunner:
 
         total_written = 0
         scan_memory_cache: dict[tuple[str, tuple[str, ...]], list[str]] = {}
+        self._progress = SearchProgress(enabled=bool(search_config.get("live_progress", True)))
+        self._progress.__enter__()
         for name, profile in selected_profiles.items():
             if not isinstance(profile, dict):
                 continue
@@ -192,6 +280,7 @@ class SearchRunner:
                         label=f"{tracker_name} source",
                         progress_interval=progress_interval,
                         scan_memory_cache=scan_memory_cache,
+                        progress=self._progress,
                     )
                     console.print(f"[cyan]{tracker_name}:[/cyan] found {len(candidates)} source candidate(s)")
                     await self._write_scan_candidates(
@@ -219,6 +308,7 @@ class SearchRunner:
                                 label=f"{tracker_name} home",
                                 progress_interval=progress_interval,
                                 scan_memory_cache=scan_memory_cache,
+                                progress=self._progress,
                             )
                             await self._write_scan_candidates(
                                 home_scan_checkpoint_file,
@@ -260,6 +350,10 @@ class SearchRunner:
                 await self._prepare_profile_search_cache(profile_contexts, name)
             elif profile_contexts:
                 total_written += await self._run_profile_api_searches(profile_contexts)
+
+        if self._progress:
+            self._progress.__exit__(None, None, None)
+            self._progress = None
 
         await self._write_run_state(
             cache_dir / "search_run_state.json",
@@ -412,14 +506,21 @@ class SearchRunner:
         api_cache_ttl_days = self._api_cache_ttl_days(search_config, target)
         api_candidates: list[ReleaseInfo] = []
         total_candidates = len(candidates)
+        progress_label = f"{tracker_name} prepare"
         if total_candidates:
-            console.print(f"[cyan]{tracker_name}:[/cyan] prepare filtering {total_candidates} source candidate(s) locally/cache-first...")
+            if self._progress:
+                self._progress.update(progress_label, phase="filtering", current=0, total=total_candidates, candidates=0)
+            else:
+                console.print(f"[cyan]{tracker_name}:[/cyan] prepare filtering {total_candidates} source candidate(s) locally/cache-first...")
         for index, candidate in enumerate(candidates, start=1):
             if progress_interval > 0 and (index == 1 or index % progress_interval == 0):
-                console.print(
-                    f"[dim]{tracker_name}: prepare filtered {index - 1}/{total_candidates} "
-                    f"candidate(s), {len(api_candidates)} still need API...[/dim]"
-                )
+                if self._progress:
+                    self._progress.update(progress_label, phase="filtering", current=index - 1, total=total_candidates, candidates=len(api_candidates))
+                else:
+                    console.print(
+                        f"[dim]{tracker_name}: prepare filtered {index - 1}/{total_candidates} "
+                        f"candidate(s), {len(api_candidates)} still need API...[/dim]"
+                    )
             release = self.matcher.parse_release(candidate)
             banned, _ = self.provider.banned_release_group(tracker_name, release)
             if banned:
@@ -440,8 +541,12 @@ class SearchRunner:
             cache_key = self._api_cache_key(tracker_name, content_profile, release)
             cached_result = self._api_cache_lookup(api_cache, cache_key, api_cache_ttl_days) if api_cache_enabled else None
             if cached_result is not None:
+                if self._progress:
+                    self._progress.increment(progress_label, "cache")
                 continue
             api_candidates.append(release)
+        if self._progress:
+            self._progress.update(progress_label, phase="filtered", current=total_candidates, total=total_candidates, candidates=len(api_candidates))
         return api_candidates
 
     async def _prepare_global_tmdb_cache(
@@ -455,13 +560,19 @@ class SearchRunner:
         if not total:
             await self._write_json(tmdb_cache_file, tmdb_cache)
             return
-        console.print(f"[cyan]TMDB:[/cyan] preparing {total} unique movie/tv ID lookup candidate(s)...")
+        if self._progress:
+            self._progress.update("TMDB", phase="ids", current=0, total=total, candidates=0)
+        else:
+            console.print(f"[cyan]TMDB:[/cyan] preparing {total} unique movie/tv ID lookup candidate(s)...")
         prepared = 0
         for index, (release, content_profile, search_config, target) in enumerate(work_items, start=1):
             progress_interval = self._progress_interval(search_config, target)
             checkpoint_interval = self._checkpoint_interval(search_config, target)
             if progress_interval > 0 and (index == 1 or index % progress_interval == 0):
-                console.print(f"[dim]TMDB: prepared {index - 1}/{total} unique candidate(s), {prepared} cached...[/dim]")
+                if self._progress:
+                    self._progress.update("TMDB", phase="ids", current=index - 1, total=total, candidates=prepared)
+                else:
+                    console.print(f"[dim]TMDB: prepared {index - 1}/{total} unique candidate(s), {prepared} cached...[/dim]")
             ids = await self.provider.resolve_external_ids(
                 release,
                 content_profile,
@@ -477,6 +588,8 @@ class SearchRunner:
                 if self.debug:
                     console.print(f"[dim]TMDB: cache checkpoint saved after {index} unique candidate(s)[/dim]")
         await self._write_json(tmdb_cache_file, tmdb_cache)
+        if self._progress:
+            self._progress.update("TMDB", phase="ids done", current=total, total=total, candidates=prepared)
         console.print(f"[green]TMDB:[/green] prepared ID cache ({prepared}/{total} cached or checked)")
 
     def _tmdb_work_key(self, content_profile: str, release: ReleaseInfo) -> str:
@@ -536,6 +649,7 @@ class SearchRunner:
         content_profile: str = "generic",
         label: str = "search",
         progress_interval: int = 5000,
+        progress: SearchProgress | None = None,
     ) -> list[str]:
         candidates: list[str] = []
         seen: set[str] = set()
@@ -544,12 +658,18 @@ class SearchRunner:
             if not path.exists():
                 console.print(f"[yellow]Search path not found: {path}[/yellow]")
                 continue
-            console.print(f"[dim]{label}: scanning {path}[/dim]")
+            if progress:
+                progress.update(label, phase="scanning", current=0, candidates=len(candidates), detail=os.fspath(path))
+            else:
+                console.print(f"[dim]{label}: scanning {path}[/dim]")
             if path.is_file():
                 self._add_candidate(path, candidates, seen, content_profile)
+                scanned += 1
                 continue
             if path.is_dir():
-                scanned += self._scan_directory(path, candidates, seen, content_profile, label, progress_interval)
+                scanned += self._scan_directory(path, candidates, seen, content_profile, label, progress_interval, progress)
+            if progress:
+                progress.update(label, phase="scanned", current=scanned, candidates=len(candidates), detail=os.fspath(path))
         return candidates
 
     def _scan_paths_cached(
@@ -559,6 +679,7 @@ class SearchRunner:
         label: str,
         progress_interval: int,
         scan_memory_cache: dict[tuple[str, tuple[str, ...]], list[str]],
+        progress: SearchProgress | None = None,
     ) -> list[str]:
         candidates: list[str] = []
         seen: set[str] = set()
@@ -566,14 +687,17 @@ class SearchRunner:
             cache_key = self._scan_memory_cache_key([path], content_profile)
             cached = scan_memory_cache.get(cache_key)
             if cached is not None:
-                console.print(f"[dim]{label}: using in-run scan cache for {path} with {len(cached)} candidate(s)[/dim]")
+                if progress:
+                    progress.update(label, phase="cached", current=len(cached), candidates=len(cached), detail=os.fspath(path))
+                else:
+                    console.print(f"[dim]{label}: using in-run scan cache for {path} with {len(cached)} candidate(s)[/dim]")
                 for candidate in cached:
                     if candidate not in seen:
                         candidates.append(candidate)
                         seen.add(candidate)
                 continue
 
-            scanned_candidates = self._scan_paths([path], content_profile, label, progress_interval)
+            scanned_candidates = self._scan_paths([path], content_profile, label, progress_interval, progress)
             scan_memory_cache[cache_key] = list(scanned_candidates)
             for candidate in scanned_candidates:
                 if candidate not in seen:
@@ -598,11 +722,12 @@ class SearchRunner:
         content_profile: str,
         label: str,
         progress_interval: int,
+        progress: SearchProgress | None = None,
     ) -> int:
         if content_profile != "tv" and self._add_disc_candidate(root, candidates, seen):
             return 1
 
-        season_pack_dirs = self._season_pack_dirs(root, label, progress_interval) if content_profile == "tv" else set()
+        season_pack_dirs = self._season_pack_dirs(root, label, progress_interval, progress) if content_profile == "tv" else set()
         if content_profile == "tv":
             for pack_dir in sorted(season_pack_dirs, key=lambda p: os.fspath(p).lower()):
                 self._add_path_candidate(pack_dir, candidates, seen)
@@ -613,7 +738,10 @@ class SearchRunner:
         for item in root.rglob("*"):
             scanned += 1
             if progress_interval > 0 and scanned % progress_interval == 0:
-                console.print(f"[dim]{label}: scanned {scanned} filesystem item(s), found {len(candidates)} candidate(s)...[/dim]")
+                if progress:
+                    progress.update(label, phase="scanning", current=scanned, candidates=len(candidates), detail=os.fspath(root))
+                else:
+                    console.print(f"[dim]{label}: scanned {scanned} filesystem item(s), found {len(candidates)} candidate(s)...[/dim]")
             if any(item == disc_root or disc_root in item.parents for disc_root in skipped_disc_roots):
                 continue
             if item.is_dir() and self._add_disc_candidate(item, candidates, seen, scan_root=root):
@@ -622,7 +750,10 @@ class SearchRunner:
             if item.is_file():
                 self._add_candidate(item, candidates, seen, content_profile, scan_root=root)
         if scanned and progress_interval > 0:
-            console.print(f"[dim]{label}: scanned {scanned} filesystem item(s), found {len(candidates)} candidate(s)[/dim]")
+            if progress:
+                progress.update(label, phase="scanned", current=scanned, candidates=len(candidates), detail=os.fspath(root))
+            else:
+                console.print(f"[dim]{label}: scanned {scanned} filesystem item(s), found {len(candidates)} candidate(s)[/dim]")
         return scanned
 
     def _add_candidate(
@@ -689,14 +820,17 @@ class SearchRunner:
                     return True
         return False
 
-    def _season_pack_dirs(self, root: Path, label: str, progress_interval: int) -> set[Path]:
+    def _season_pack_dirs(self, root: Path, label: str, progress_interval: int, progress: SearchProgress | None = None) -> set[Path]:
         pack_dirs: set[Path] = set()
         scanned = 0
         directories = (item for item in root.rglob("*") if item.is_dir())
         for directory in itertools.chain([root], directories):
             scanned += 1
             if progress_interval > 0 and scanned % progress_interval == 0:
-                console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)...[/dim]")
+                if progress:
+                    progress.update(label, phase="scanning", current=scanned, candidates=len(pack_dirs), detail=os.fspath(root))
+                else:
+                    console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)...[/dim]")
             if self._is_disc_root(directory):
                 self._add_tv_disc_container_dirs(directory, root, pack_dirs)
                 continue
@@ -720,7 +854,10 @@ class SearchRunner:
             ):
                 pack_dirs.add(directory)
         if scanned and progress_interval > 0:
-            console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)[/dim]")
+            if progress:
+                progress.update(label, phase="scanned", current=scanned, candidates=len(pack_dirs), detail=os.fspath(root))
+            else:
+                console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)[/dim]")
         return pack_dirs
 
     def _add_tv_disc_container_dirs(self, disc_root: Path, scan_root: Path, pack_dirs: set[Path]) -> None:
@@ -939,11 +1076,63 @@ class SearchRunner:
         api_delay_seconds = self._api_delay_seconds(search_config, target)
         api_error_backoff_seconds = self._api_error_backoff_seconds(search_config, target)
         total_candidates = len(candidates)
+        progress_label = tracker_name
+        status_counts = {
+            "queued": 0,
+            "missing": 0,
+            "exists": 0,
+            "local": 0,
+            "cache": 0,
+            "skipped": 0,
+            "errors": 0,
+        }
+
+        def update_progress(phase: str, current: int, total: int, detail: str = "") -> None:
+            if not self._progress:
+                return
+            self._progress.update(
+                progress_label,
+                phase=phase,
+                current=current,
+                total=total,
+                candidates=len(api_candidates),
+                queued=status_counts["queued"],
+                missing=status_counts["missing"],
+                exists=status_counts["exists"],
+                local=status_counts["local"],
+                cache=status_counts["cache"],
+                skipped=status_counts["skipped"],
+                errors=status_counts["errors"],
+                detail=detail,
+            )
+
+        def count_status(status: str, queue: bool = False, cache_hit: bool = False) -> None:
+            if queue:
+                status_counts["queued"] += 1
+            if cache_hit:
+                status_counts["cache"] += 1
+            if status == "missing":
+                status_counts["missing"] += 1
+            elif status == "exists":
+                status_counts["exists"] += 1
+            elif status in {"local_exists", "client_exists"}:
+                status_counts["local"] += 1
+            elif status in {"banned_group"} or status.startswith("wrong_category"):
+                status_counts["skipped"] += 1
+            elif status == "unknown" or "error" in status:
+                status_counts["errors"] += 1
+
         if total_candidates:
-            console.print(f"[cyan]{tracker_name}:[/cyan] filtering {total_candidates} source candidate(s) locally/cache-first...")
+            if self._progress:
+                update_progress("filtering", 0, total_candidates)
+            else:
+                console.print(f"[cyan]{tracker_name}:[/cyan] filtering {total_candidates} source candidate(s) locally/cache-first...")
         for index, candidate in enumerate(candidates, start=1):
             if progress_interval > 0 and (index == 1 or index % progress_interval == 0):
-                console.print(f"[dim]{tracker_name}: locally filtered {index - 1}/{total_candidates} candidate(s)...[/dim]")
+                if self._progress:
+                    update_progress("filtering", index - 1, total_candidates)
+                else:
+                    console.print(f"[dim]{tracker_name}: locally filtered {index - 1}/{total_candidates} candidate(s)...[/dim]")
             release = self.matcher.parse_release(candidate)
             ids: dict[str, Any] = {}
             queries = self.matcher.build_queries(release, ids)
@@ -965,6 +1154,8 @@ class SearchRunner:
                 })
                 if self.debug:
                     console.print(f"[yellow]{tracker_name}: {release.basename} -> banned_group ({banned_group})[/yellow]")
+                count_status("banned_group")
+                update_progress("filtering", index, total_candidates, release.basename)
                 await self._checkpoint_search_progress(index, checkpoint_interval, cache_file, plan, api_cache_file, api_cache, tmdb_cache_file, tmdb_cache, search_config, target, tracker_name, queue_file)
                 continue
             if torrent_index_prefilter:
@@ -986,6 +1177,8 @@ class SearchRunner:
                     })
                     if self.debug:
                         console.print(f"[yellow]{tracker_name}: {release.basename} -> client_exists ({client_reason})[/yellow]")
+                    count_status("client_exists")
+                    update_progress("filtering", index, total_candidates, release.basename)
                     await self._checkpoint_search_progress(index, checkpoint_interval, cache_file, plan, api_cache_file, api_cache, tmdb_cache_file, tmdb_cache, search_config, target, tracker_name, queue_file)
                     continue
             if local_prefilter and home_releases:
@@ -1013,6 +1206,8 @@ class SearchRunner:
                     if self.debug:
                         match_name = local_match.basename if local_match else "unknown"
                         console.print(f"[yellow]{tracker_name}: {release.basename} -> local_exists ({local_reason}: {match_name})[/yellow]")
+                    count_status("local_exists")
+                    update_progress("filtering", index, total_candidates, release.basename)
                     await self._checkpoint_search_progress(index, checkpoint_interval, cache_file, plan, api_cache_file, api_cache, tmdb_cache_file, tmdb_cache, search_config, target, tracker_name, queue_file)
                     continue
 
@@ -1038,6 +1233,8 @@ class SearchRunner:
                 if self.debug:
                     color = "green" if should_queue else "yellow"
                     console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} (api_cache_hit)[/{color}]")
+                count_status(status, queue=should_queue, cache_hit=True)
+                update_progress("filtering", index, total_candidates, release.basename)
                 await self._checkpoint_search_progress(index, checkpoint_interval, cache_file, plan, api_cache_file, api_cache, tmdb_cache_file, tmdb_cache, search_config, target, tracker_name, queue_file)
                 continue
 
@@ -1049,15 +1246,21 @@ class SearchRunner:
             })
 
         if total_candidates:
-            console.print(
-                f"[cyan]{tracker_name}:[/cyan] local/cache filtering complete: "
-                f"{len(api_candidates)} candidate(s) need TMDB/tracker API search"
-            )
+            if self._progress:
+                update_progress("filtered", total_candidates, total_candidates)
+            else:
+                console.print(
+                    f"[cyan]{tracker_name}:[/cyan] local/cache filtering complete: "
+                    f"{len(api_candidates)} candidate(s) need TMDB/tracker API search"
+                )
 
         total_api_candidates = len(api_candidates)
         for api_index, item in enumerate(api_candidates, start=1):
             if progress_interval > 0 and (api_index == 1 or api_index % progress_interval == 0):
-                console.print(f"[dim]{tracker_name}: API searched {api_index - 1}/{total_api_candidates} candidate(s)...[/dim]")
+                if self._progress:
+                    update_progress("api", api_index - 1, total_api_candidates)
+                else:
+                    console.print(f"[dim]{tracker_name}: API searched {api_index - 1}/{total_api_candidates} candidate(s)...[/dim]")
             candidate = str(item["candidate"])
             release = item["release"]
             cache_key = str(item["cache_key"])
@@ -1109,6 +1312,8 @@ class SearchRunner:
                     })
                     if self.debug:
                         console.print(f"[yellow]{tracker_name}: {release.basename} -> {status} ({tracker_result.get('reason')})[/yellow]")
+                    count_status(status)
+                    update_progress("api", api_index, total_api_candidates, release.basename)
                     await self._checkpoint_search_progress(
                         len(plan),
                         checkpoint_interval,
@@ -1155,6 +1360,8 @@ class SearchRunner:
             if self.debug:
                 color = "green" if should_queue else "yellow"
                 console.print(f"[{color}]{tracker_name}: {release.basename} -> {status} ({tracker_result.get('reason')})[/{color}]")
+            count_status(status, queue=should_queue)
+            update_progress("api", api_index, total_api_candidates, release.basename)
             await self._checkpoint_search_progress(
                 len(plan),
                 checkpoint_interval,
@@ -1170,7 +1377,10 @@ class SearchRunner:
                 queue_file,
             )
         if total_candidates:
-            console.print(f"[cyan]{tracker_name}:[/cyan] finished checking {total_candidates} candidate(s)")
+            if self._progress:
+                update_progress("done", total_api_candidates, total_api_candidates)
+            else:
+                console.print(f"[cyan]{tracker_name}:[/cyan] finished checking {total_candidates} candidate(s)")
         return plan
 
     async def _wrong_tmdb_category_ids(
