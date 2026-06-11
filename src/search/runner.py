@@ -22,6 +22,8 @@ MUSIC_EXTENSIONS = {".flac", ".mp3", ".m4a", ".aac", ".alac", ".wav", ".ogg", ".
 BOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".lit", ".cbz", ".cbr", ".m4b"}
 SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS | MUSIC_EXTENSIONS | BOOK_EXTENSIONS
 EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}e\d{1,3}|s\d{1,2}e\d{1,3}e\d{1,3}|\d{1,2}x\d{1,3}|(?:19|20)\d{2}[.\-_]\d{1,2}[.\-_]\d{1,2})(?:[.\s_\-]|$)")
+DAILY_EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:19|20)\d{2}[.\-_]\d{1,2}[.\-_]\d{1,2}(?:[.\s_\-]|$)")
+ANIME_EPISODE_NUMBER_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:e(?:p(?:isode)?)?[.\s_\-]?)?\d{1,3}(?:v\d+)?(?:[.\s_\-]|$)")
 SEASON_PACK_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}|season[.\s_\-]?\d{1,2}|complete)(?:[.\s_\-]|$)")
 DISC_MARKERS = {
     "BDMV": {"BDMV/index.bdmv", "BDMV/BACKUP/index.bdmv"},
@@ -43,6 +45,7 @@ class SearchRunner:
                 fuzzy_threshold = 0.02
         self.matcher = SearchMatcher(fuzzy_size_threshold=fuzzy_threshold)
         self.provider = SearchProvider(config, base_dir, self.matcher, debug=debug)
+        self._tv_parent_cache: dict[str, bool] = {}
 
     async def run(
         self,
@@ -593,10 +596,10 @@ class SearchRunner:
     def _add_candidate(self, path: Path, candidates: list[str], seen: set[str], content_profile: str = "generic") -> None:
         suffix = path.suffix.lower()
         if content_profile == "movie":
-            if suffix not in VIDEO_EXTENSIONS or self._is_episode_name(path.name):
+            if suffix not in VIDEO_EXTENSIONS or self._looks_like_tv_episode_path(path):
                 return
         elif content_profile == "tv":
-            if suffix not in VIDEO_EXTENSIONS or not self._is_season_pack_name(path.name):
+            if suffix not in VIDEO_EXTENSIONS or not self._is_daily_episode_name(path.name):
                 return
         elif content_profile == "music":
             if suffix not in MUSIC_EXTENSIONS:
@@ -643,9 +646,19 @@ class SearchRunner:
                 item for item in directory.iterdir()
                 if item.is_file()
                 and item.suffix.lower() in VIDEO_EXTENSIONS
-                and self._is_episode_name(item.name)
             ]
-            if len(video_files) >= 2 and (self._is_season_pack_name(directory.name) or self._has_single_season(video_files)):
+            for video_file in video_files:
+                if self._is_daily_episode_name(video_file.name):
+                    pack_dirs.add(video_file)
+            if (
+                len(video_files) >= 2
+                and (
+                    self._is_season_pack_name(directory.name)
+                    or self._is_episode_name(directory.name)
+                    or self._has_single_season(video_files)
+                    or self._has_numbered_episode_files(video_files)
+                )
+            ):
                 pack_dirs.add(directory)
         if scanned and progress_interval > 0:
             console.print(f"[dim]{label}: scanned {scanned} folder(s), found {len(pack_dirs)} season pack(s)[/dim]")
@@ -677,11 +690,61 @@ class SearchRunner:
                 seasons.add(match.group(1).zfill(2))
         return len(seasons) == 1
 
+    def _has_numbered_episode_files(self, paths: list[Path]) -> bool:
+        numbered = 0
+        for path in paths:
+            if self._is_episode_name(path.name) or ANIME_EPISODE_NUMBER_RE.search(path.stem):
+                numbered += 1
+        return numbered >= 2
+
     def _is_episode_name(self, name: str) -> bool:
         return bool(EPISODE_RE.search(name))
 
+    def _is_daily_episode_name(self, name: str) -> bool:
+        return bool(DAILY_EPISODE_RE.search(name))
+
     def _is_season_pack_name(self, name: str) -> bool:
         return bool(SEASON_PACK_RE.search(name)) and not self._is_episode_name(name)
+
+    def _looks_like_tv_episode_path(self, path: Path) -> bool:
+        if self._is_episode_name(path.name):
+            return True
+        if any(self._is_episode_name(parent.name) or self._is_season_pack_name(parent.name) for parent in path.parents):
+            return True
+        return self._parent_looks_like_tv_pack(path)
+
+    def _parent_looks_like_tv_pack(self, path: Path) -> bool:
+        parent = path.parent
+        cache_key = os.fspath(parent.resolve()) if parent.exists() else os.fspath(parent)
+        cached = self._tv_parent_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        if not parent.exists() or not parent.is_dir():
+            self._tv_parent_cache[cache_key] = False
+            return False
+
+        try:
+            video_files = [
+                item for item in parent.iterdir()
+                if item.is_file()
+                and item.suffix.lower() in VIDEO_EXTENSIONS
+            ]
+        except OSError:
+            self._tv_parent_cache[cache_key] = False
+            return False
+
+        looks_like_pack = (
+            len(video_files) >= 2
+            and (
+                self._is_season_pack_name(parent.name)
+                or self._is_episode_name(parent.name)
+                or self._has_single_season(video_files)
+                or self._has_numbered_episode_files(video_files)
+            )
+        )
+        self._tv_parent_cache[cache_key] = looks_like_pack
+        return looks_like_pack
 
     def _content_profile(self, profile_name: str, target: dict[str, Any]) -> str:
         configured = str(target.get("content") or target.get("category") or "").strip().lower()
@@ -910,6 +973,59 @@ class SearchRunner:
                     delay_seconds=tmdb_delay_seconds,
                     error_backoff_seconds=tmdb_error_backoff_seconds,
                 )
+                wrong_category_ids = await self._wrong_tmdb_category_ids(
+                    release,
+                    content_profile,
+                    ids,
+                    search_config,
+                    target,
+                    tmdb_cache,
+                    tmdb_cache_ttl_days,
+                    tmdb_delay_seconds,
+                    tmdb_error_backoff_seconds,
+                )
+                if wrong_category_ids:
+                    status = f"wrong_category_{wrong_category_ids.get('media_type', 'unknown')}"
+                    tracker_result = {
+                        "status": status,
+                        "reason": f"tmdb_category_guard:{wrong_category_ids.get('media_type', 'unknown')}/{wrong_category_ids.get('tmdb', '')}",
+                        "matched": False,
+                        "matched_result": None,
+                        "queries": [],
+                    }
+                    if api_cache_enabled and self._should_cache_status(status, search_config, target):
+                        self._api_cache_store(api_cache, cache_key, tracker_name, content_profile, release, status, tracker_result)
+                    plan.append({
+                        "tracker": tracker_name,
+                        "path": candidate,
+                        "release": release.to_dict(),
+                        "ids": wrong_category_ids,
+                        "queries": [],
+                        "status": status,
+                        "reason": tracker_result.get("reason"),
+                        "queue": False,
+                        "matched_result": None,
+                        "local_match": None,
+                        "query_results": [],
+                        "cache_hit": False,
+                    })
+                    if self.debug:
+                        console.print(f"[yellow]{tracker_name}: {release.basename} -> {status} ({tracker_result.get('reason')})[/yellow]")
+                    await self._checkpoint_search_progress(
+                        len(plan),
+                        checkpoint_interval,
+                        cache_file,
+                        plan,
+                        api_cache_file,
+                        api_cache,
+                        tmdb_cache_file,
+                        tmdb_cache,
+                        search_config,
+                        target,
+                        tracker_name,
+                        queue_file,
+                    )
+                    continue
             queries = self.matcher.build_queries(release, ids)
             tracker_result = await self.provider.check_tracker(
                 tracker_name,
@@ -958,6 +1074,33 @@ class SearchRunner:
         if total_candidates:
             console.print(f"[cyan]{tracker_name}:[/cyan] finished checking {total_candidates} candidate(s)")
         return plan
+
+    async def _wrong_tmdb_category_ids(
+        self,
+        release: ReleaseInfo,
+        content_profile: str,
+        ids: dict[str, Any],
+        search_config: dict[str, Any],
+        target: dict[str, Any],
+        tmdb_cache: dict[str, Any],
+        tmdb_cache_ttl_days: float,
+        tmdb_delay_seconds: float,
+        tmdb_error_backoff_seconds: float,
+    ) -> dict[str, Any]:
+        if not self._tmdb_category_guard_enabled(search_config, target):
+            return {}
+        if content_profile == "movie" and not ids.get("tmdb"):
+            tv_ids = await self.provider.resolve_external_ids(
+                release,
+                "tv",
+                tmdb_cache,
+                ttl_days=tmdb_cache_ttl_days,
+                delay_seconds=tmdb_delay_seconds,
+                error_backoff_seconds=tmdb_error_backoff_seconds,
+            )
+            if tv_ids.get("tmdb"):
+                return tv_ids
+        return {}
 
     def _local_prefilter_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
         if "local_prefilter" in target:
@@ -1099,6 +1242,11 @@ class SearchRunner:
         if "tmdb_lookup" in target:
             return bool(target.get("tmdb_lookup"))
         return bool(search_config.get("tmdb_lookup", True))
+
+    def _tmdb_category_guard_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
+        if "tmdb_category_guard" in target:
+            return bool(target.get("tmdb_category_guard"))
+        return bool(search_config.get("tmdb_category_guard", True))
 
     def _tmdb_cache_enabled(self, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
         if "tmdb_cache" in target:
@@ -1344,7 +1492,7 @@ class SearchRunner:
         }
 
     def _should_cache_status(self, status: str, search_config: dict[str, Any], target: dict[str, Any]) -> bool:
-        if status in {"exists", "missing"}:
+        if status in {"exists", "missing"} or status.startswith("wrong_category_"):
             return True
         cache_unknown = target.get("api_cache_unknown", search_config.get("api_cache_unknown", False))
         return bool(cache_unknown)

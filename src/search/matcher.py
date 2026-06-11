@@ -240,8 +240,14 @@ class SearchMatcher:
 
     def _parse_title(self, release_name: str, year: str) -> str:
         title_part = release_name
+        title_part = re.sub(r"^(?:\[[^\]]+\]\s*)+", "", title_part)
+        title_part = re.sub(r"\s*\[[A-Fa-f0-9]{6,}\]\s*$", "", title_part)
+        title_part = re.sub(r"\s*\((?:4320p|2160p|1080p|1080i|720p|576p|576i|480p|480i)\)\s*$", "", title_part, flags=re.IGNORECASE)
         if year and year in title_part:
             title_part = title_part.split(year, 1)[0]
+        elif not year:
+            title_part = re.sub(r"(?i)\s+[-._]\s+s\d{1,2}\s+[-._]\s+\d{1,3}(?:v\d+)?\s*$", "", title_part)
+            title_part = re.sub(r"(?i)\s+[-._]\s+\d{1,3}(?:v\d+)?\s*$", "", title_part)
         title_part = re.sub(r"-(?P<group>[A-Za-z0-9][A-Za-z0-9._-]{1,20})$", "", title_part)
         title_part = self.humanize(title_part)
         return title_part.strip()

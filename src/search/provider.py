@@ -8,6 +8,7 @@ from typing import Any, Optional
 import httpx
 
 from src.console import console
+from src.dupe_checking import DupeChecker
 from src.search.matcher import ReleaseInfo, SearchMatcher, SearchQuery
 from src.trackersetup import tracker_class_map
 
@@ -18,6 +19,7 @@ class SearchProvider:
         self.base_dir = base_dir
         self.matcher = matcher
         self.debug = debug
+        self.dupe_checker = DupeChecker(config)
 
     async def resolve_external_ids(
         self,
@@ -63,7 +65,7 @@ class SearchProvider:
                     return ids
 
                 tmdb_id = str(result.get("id") or "")
-                ids = {"tmdb": tmdb_id, "imdb": "", "source": "tmdb"}
+                ids = {"tmdb": tmdb_id, "imdb": "", "source": "tmdb", "media_type": search_type}
                 if tmdb_id:
                     external_response = await client.get(
                         f"https://api.themoviedb.org/3/{search_type}/{tmdb_id}/external_ids",
@@ -158,17 +160,33 @@ class SearchProvider:
             })
             all_results.extend(results)
 
-            for result in results:
-                matched, reason = self.matcher.result_matches_release(release, result)
-                if matched:
+            if results:
+                filtered_dupes = await self.dupe_checker.filter_dupes(
+                    results,
+                    self._search_meta(tracker_key, release, query, content_profile, ids or {}),
+                    tracker_key,
+                )
+                if filtered_dupes:
                     return {
                         "status": "exists",
-                        "reason": reason,
+                        "reason": "dupe_checker",
                         "matched": True,
-                        "matched_result": result,
+                        "matched_result": filtered_dupes[0],
                         "queries": query_log,
                         "results": all_results,
                     }
+
+                for result in results:
+                    matched, reason = self.matcher.result_matches_release(release, result)
+                    if matched:
+                        return {
+                            "status": "exists",
+                            "reason": reason,
+                            "matched": True,
+                            "matched_result": result,
+                            "queries": query_log,
+                            "results": all_results,
+                        }
 
         if not query_log:
             return {
@@ -212,6 +230,8 @@ class SearchProvider:
         tmdb = str(ids.get("tmdb") or "0")
         imdb = str(ids.get("imdb") or "0")
         imdb_numeric = re.sub(r"^tt", "", imdb)
+        filelist = self._filelist(release.path)
+        mediainfo = {"media": {"track": [{"FileSize": str(release.size or 0)}]}}
         return {
             "base_dir": self.base_dir,
             "path": release.path,
@@ -238,11 +258,14 @@ class SearchProvider:
             "dvd_size": self._dvd_size(release.size) if is_disc == "DVD" else "",
             "is_music": False,
             "is_book": False,
-            "filelist": [release.path],
+            "filelist": filelist,
             "container": ext,
             "tag": f"-{release.group}" if release.group else "",
             "audio": "",
             "video_codec": "",
+            "video_encode": release.release_name,
+            "source_size": release.size,
+            "mediainfo": mediainfo,
             "tmdb": tmdb,
             "tmdb_id": int(tmdb) if tmdb.isdigit() else 0,
             "imdb": imdb_numeric if imdb_numeric.isdigit() else "0",
@@ -255,6 +278,12 @@ class SearchProvider:
             "keywords": "",
             "combined_genres": "",
         }
+
+    def _filelist(self, path: str) -> list[str]:
+        path_obj = Path(path)
+        if path_obj.exists() and path_obj.is_dir():
+            return [str(item) for item in path_obj.rglob("*") if item.is_file()]
+        return [path]
 
     def _disc_type(self, path: str) -> str | bool:
         from pathlib import Path

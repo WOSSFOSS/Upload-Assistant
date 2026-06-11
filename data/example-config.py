@@ -1000,6 +1000,8 @@ config = {
         # Resolve TMDB/IMDb IDs before tracker searches when possible.
         # This cache is tracker-independent and avoids repeating TMDB lookups for the same release.
         "tmdb_lookup": True,
+        # When searching movies, skip candidates that TMDB only resolves as TV.
+        "tmdb_category_guard": True,
         "tmdb_cache": True,
         "tmdb_cache_ttl_days": 180,
         # Optional grace period for real TMDB lookups. Cache hits do not wait.

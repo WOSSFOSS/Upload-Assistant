@@ -166,13 +166,11 @@ class ZNTH(UNIT3D):
             'HDTV': '6',
             'FLAC': '7',
             'MP3': '8',
-            'UHDTV': '9',
-            'SDTV': '10',
-            'BOOK': '8',
-            'COMIC': '8',
-            'MAGAZINE': '8',
-            'UNABRIDGED': '8',
-            'ABRIDGED': '8',
+            'EBOOK': '9',
+            'AUDIOBOOK': '10',
+            'SPORTS': '14',
+            'EDUCATIONAL': '15',
+            'OTHER': '16',
         }
         if mapping_only:
             return type_id

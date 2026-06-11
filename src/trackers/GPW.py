@@ -606,7 +606,7 @@ class GPW:
             formatted_slots = [f'- {slot}' for slot in final_slots_list]
             final_slots = '\n'.join(formatted_slots)
 
-            if final_slots:
+            if final_slots and not meta.get('search_mode'):
                 final_slots = final_slots.replace('Slot', '').replace('Empty slots:', '').strip()
                 if resolution == meta.get('resolution'):
                     console.print(f'\n[green]Available Slots for[/green] {resolution}:')
