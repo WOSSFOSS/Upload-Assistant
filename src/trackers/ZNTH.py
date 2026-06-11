@@ -4,8 +4,10 @@ from pathlib import Path
 from typing import Any
 
 import aiofiles
+import cli_ui
 import httpx
 
+from src.console import console
 from src.trackers.COMMON import COMMON
 from src.trackers.UNIT3D import UNIT3D
 
@@ -32,7 +34,25 @@ class ZNTH(UNIT3D):
         znth_name = meta['name']
         if meta['category'] == 'TV' and meta.get('episode_title', "") != "":
             znth_name = znth_name.replace(f"{meta['episode_title']} {meta['resolution']}", f"{meta['resolution']}", 1)
+        imdb_year = str(meta.get('imdb_info', {}).get('year', ""))
+        year = str(meta.get('year', ""))
+        if meta.get('category') != "TV" and imdb_year and imdb_year.strip() and year and year.strip() and imdb_year != year:
+            znth_name = znth_name.replace(f"{year}", imdb_year, 1)
         return {'name': znth_name}
+
+    async def get_additional_checks(self, meta: dict[str, Any]) -> bool:
+        genres = ", ".join(part for part in (meta.get('keywords', ''), meta.get('combined_genres', '')) if part)
+        adult_keywords = ['xxx', 'erotic', 'porn', 'adult', 'orgy', 'hentai']
+        if any(re.search(rf'(^|,\s*){re.escape(keyword)}(\s*,|$)', genres, re.IGNORECASE) for keyword in adult_keywords):
+            unattended = bool(meta.get('unattended', False))
+            if not unattended or meta.get('unattended_confirm', False):
+                console.print(f'[bold red]Porn/xxx is not allowed at {self.tracker}.')
+                if not cli_ui.ask_yes_no("Do you want to upload anyway?", default=False):
+                    return False
+            else:
+                return False
+
+        return True
 
     def _get_book_name(self, meta: dict[str, Any]) -> str:
         author = self._clean_name_part(meta.get('author')) or 'Unknown Author'
@@ -234,7 +254,6 @@ class ZNTH(UNIT3D):
             return cover_path
         except Exception as e:
             if meta.get('debug'):
-                from src.console import console
                 console.print(f"[yellow]ZNTH: Failed to download album cover: {e}[/yellow]")
             return None
 
