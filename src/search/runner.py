@@ -23,7 +23,7 @@ BOOK_EXTENSIONS = {".epub", ".pdf", ".mobi", ".azw3", ".lit", ".cbz", ".cbr", ".
 SUPPORTED_EXTENSIONS = VIDEO_EXTENSIONS | MUSIC_EXTENSIONS | BOOK_EXTENSIONS
 EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}e\d{1,3}|s\d{1,2}e\d{1,3}e\d{1,3}|\d{1,2}x\d{1,3}|(?:19|20)\d{2}[.\-_]\d{1,2}[.\-_]\d{1,2})(?:[.\s_\-]|$)")
 DAILY_EPISODE_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:19|20)\d{2}[.\-_]\d{1,2}[.\-_]\d{1,2}(?:[.\s_\-]|$)")
-ANIME_EPISODE_NUMBER_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:e(?:p(?:isode)?)?[.\s_\-]?)?\d{1,3}(?:v\d+)?(?:[.\s_\-]|$)")
+ANIME_EPISODE_NUMBER_RE = re.compile(r"(?i)(?:^|[\s_\-])(?:e(?:p(?:isode)?)?[\s_\-]?)?\d{1,3}(?:v\d+)?(?:[\s_\-]|\(|$)")
 SEASON_PACK_RE = re.compile(r"(?i)(?:^|[.\s_\-])(?:s\d{1,2}|season[.\s_\-]?\d{1,2}|complete)(?:[.\s_\-]|$)")
 SAMPLE_RE = re.compile(r"(?i)(?:^|[.\s_\-])sample(?:[.\s_\-]|$)")
 DISC_MARKERS = {
@@ -593,7 +593,7 @@ class SearchRunner:
                 console.print(f"[dim]{label}: scanned {scanned} filesystem item(s), found {len(candidates)} candidate(s)...[/dim]")
             if any(item == disc_root or disc_root in item.parents for disc_root in skipped_disc_roots):
                 continue
-            if item.is_dir() and self._add_disc_candidate(item, candidates, seen):
+            if item.is_dir() and self._add_disc_candidate(item, candidates, seen, scan_root=root):
                 skipped_disc_roots.add(item)
                 continue
             if item.is_file():
@@ -629,11 +629,28 @@ class SearchRunner:
         candidates.append(resolved)
         seen.add(resolved)
 
-    def _add_disc_candidate(self, path: Path, candidates: list[str], seen: set[str]) -> bool:
+    def _add_disc_candidate(self, path: Path, candidates: list[str], seen: set[str], scan_root: Path | None = None) -> bool:
         if not path.is_dir() or not self._is_disc_root(path):
             return False
-        self._add_path_candidate(path, candidates, seen)
+        self._add_path_candidate(self._disc_release_root(path, scan_root), candidates, seen)
         return True
+
+    def _disc_release_root(self, disc_root: Path, scan_root: Path | None = None) -> Path:
+        parent = disc_root.parent
+        if parent == disc_root or (scan_root is not None and parent == scan_root):
+            return disc_root
+        if self._is_disc_part_dir(disc_root) or self._count_child_disc_roots(parent) > 1:
+            return parent
+        return disc_root
+
+    def _is_disc_part_dir(self, path: Path) -> bool:
+        return bool(re.search(r"(?i)(?:^|[._\-\s])(?:disc|disk|bd|dvd)[._\-\s]*\d{1,2}(?:[._\-\s]|$)", path.name))
+
+    def _count_child_disc_roots(self, path: Path) -> int:
+        try:
+            return sum(1 for item in path.iterdir() if item.is_dir() and self._is_disc_root(item))
+        except OSError:
+            return 0
 
     def _is_disc_root(self, path: Path) -> bool:
         for marker_set in DISC_MARKERS.values():
@@ -1361,6 +1378,8 @@ class SearchRunner:
             return None
         if not isinstance(data, dict):
             return None
+        if int(data.get("version") or 0) < 2:
+            return None
         if str(data.get("tracker") or "").upper() != tracker_name:
             return None
         if str(data.get("profile") or "") != profile_name:
@@ -1402,7 +1421,7 @@ class SearchRunner:
         home_paths: list[Path],
     ) -> None:
         await self._write_json(path, {
-            "version": 1,
+            "version": 2,
             "stage": stage,
             "tracker": tracker_name,
             "profile": profile_name,
