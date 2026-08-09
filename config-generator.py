@@ -261,6 +261,7 @@ def migrate_old_config(config_dict: ConfigDict) -> ConfigDict:
                     new_trackers_section[k] = v
             if "default_trackers" in config_dict["TRACKERS"]:
                 # Migrate default_trackers
+                val = config_dict["TRACKERS"]["default_trackers"]
                 if isinstance(val, str):
                     trackers_list = [t.strip() for t in val.split(",") if t.strip()]
                     new_list = []
