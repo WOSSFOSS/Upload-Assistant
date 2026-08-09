@@ -272,6 +272,7 @@ def migrate_old_config(config_dict: ConfigDict) -> ConfigDict:
                             migrated = True
                         else:
                             new_list.append(t)
+                    new_trackers_section["default_trackers"] = ",".join(new_list)
             config_dict["TRACKERS"] = new_trackers_section
 
     if migrated:
