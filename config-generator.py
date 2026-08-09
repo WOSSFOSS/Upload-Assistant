@@ -302,6 +302,7 @@ def load_existing_config() -> tuple[ConfigDict | None, Path | None]:
                     return migrate_old_config(cast(ConfigDict, config_dict)), path
             except Exception as e:
                 console.print(f"\n[!] Error loading config from {path}: {e}", markup=False)
+                raise
 
     return None, None
 
