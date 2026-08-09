@@ -244,17 +244,7 @@ def migrate_old_config(config_dict: ConfigDict) -> ConfigDict:
     # Migrate DEFAULT -> default_trackers
     if "DEFAULT" in config_dict and "default_trackers" in config_dict["DEFAULT"]:
         val = config_dict["DEFAULT"]["default_trackers"]
-        if isinstance(val, str):
-            trackers_list = [t.strip() for t in val.split(",") if t.strip()]
-            new_list = []
-            for t in trackers_list:
-                t_upper = t.upper()
-                if t_upper in manual_mapping:
-                    new_list.append(manual_mapping[t_upper])
-                    migrated = True
-                else:
-                    new_list.append(t)
-            config_dict["DEFAULT"]["default_trackers"] = ",".join(new_list)
+        config_dict["TRACKERS"]["default_trackers"] = val
 
     # Migrate TRACKERS section keys
     if "TRACKERS" in config_dict:
@@ -269,6 +259,18 @@ def migrate_old_config(config_dict: ConfigDict) -> ConfigDict:
                     migrated = True
                 else:
                     new_trackers_section[k] = v
+            if "default_trackers" in config_dict["TRACKERS"]:
+                # Migrate default_trackers
+                if isinstance(val, str):
+                    trackers_list = [t.strip() for t in val.split(",") if t.strip()]
+                    new_list = []
+                    for t in trackers_list:
+                        t_upper = t.upper()
+                        if t_upper in manual_mapping:
+                            new_list.append(manual_mapping[t_upper])
+                            migrated = True
+                        else:
+                            new_list.append(t)
             config_dict["TRACKERS"] = new_trackers_section
 
     if migrated:
